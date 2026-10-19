@@ -472,6 +472,12 @@ Dependency edge in inference graph:
 
 ### GDCallSiteCollector
 Collects all call sites in a method for inter-procedural analysis.
+- **Linear cost (D7a):** a call-name index (method name → scripts containing a call with that name: direct
+  `f()`, member `o.f()`, `o.call("f")`/`callv` via `GDStaticStringExtractor`) is built once per inference run;
+  collection visits only the indexed scripts. `Reset()` is called by `GDMethodSignatureInferenceEngine.BuildAll()`
+  and `Invalidate()`.
+- `GDMethodSignatureInferenceEngine` skips call-site collection for methods whose parameters all have an
+  explicit non-Variant type (their report uses the explicit types anyway).
 
 ### GDClassVariableCollector
 Collects class-level Variant variables for union type inference.

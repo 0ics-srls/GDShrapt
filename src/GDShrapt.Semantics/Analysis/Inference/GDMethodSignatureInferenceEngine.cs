@@ -48,10 +48,15 @@ internal class GDMethodSignatureInferenceEngine
     /// <summary>
     /// Builds inference for all methods in the project.
     /// </summary>
+    /// <summary>Test seam: the collector used by this engine.</summary>
+    internal GDCallSiteCollector CallSiteCollector => _callSiteCollector;
+
     public void BuildAll()
     {
         if (_isBuilt)
             return;
+
+        _callSiteCollector.Reset();
 
         // Lookup for progressive injection
         var filesByType = new Dictionary<string, GDScriptFile>(StringComparer.OrdinalIgnoreCase);
@@ -168,6 +173,7 @@ internal class GDMethodSignatureInferenceEngine
     /// </summary>
     public void Invalidate()
     {
+        _callSiteCollector.Reset();
         _methodReports.Clear();
         _projectReport = null;
         _isBuilt = false;
@@ -193,7 +199,16 @@ internal class GDMethodSignatureInferenceEngine
         var parameterReports = new Dictionary<string, GDParameterInferenceReport>();
         if (method.Parameters != null)
         {
-            var callSites = _callSiteCollector.CollectCallSites(typeName, methodName);
+            // Call sites only matter for parameters without an explicit non-Variant type (D7a):
+            // for fully typed methods BuildParameterReport uses the explicit types and ignores them.
+            var needsCallSites = method.Parameters.Any(p =>
+            {
+                var t = p.Type?.BuildName();
+                return string.IsNullOrEmpty(t) || t == GDWellKnownTypes.Variant;
+            });
+            var callSites = needsCallSites
+                ? _callSiteCollector.CollectCallSites(typeName, methodName)
+                : (IReadOnlyList<GDCallSiteInfo>)Array.Empty<GDCallSiteInfo>();
 
             for (int i = 0; i < method.Parameters.Count; i++)
             {
@@ -202,7 +217,7 @@ internal class GDMethodSignatureInferenceEngine
 
                 var paramName = param.Identifier.Sequence;
                 var explicitType = param.Type?.BuildName();
-                var hasExplicit = !string.IsNullOrEmpty(explicitType) && explicitType != "Variant";
+                var hasExplicit = !string.IsNullOrEmpty(explicitType) && explicitType != GDWellKnownTypes.Variant;
 
                 // Build parameter report
                 var paramReport = BuildParameterReport(
