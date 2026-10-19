@@ -130,7 +130,8 @@ today (a known, non-user-visible inconsistency: each LSP/Plugin consumer compens
 |------------|------|--------|
 | `GDCliReferenceLocation` (find-refs) | 1-based | **1-based** |
 | `GDDefinitionLocation` (go-to-def / type-def / impl) | 1-based | **0-based** |
-| Inlay hints / document symbols / rename edits / code lens | 1-based | 1-based |
+| Inlay hints / rename edits / code lens | 1-based | 1-based |
+| Document symbols (`GDDocumentSymbol`) | 1-based (identifier; `EndLine` = last line of the declaration) | 1-based (identifier; `EndColumn` exclusive) |
 | Diagnostics (`GDUnifiedDiagnostic`) & semantic tokens | 1-based line / 0-based col (AST-aligned; shared with the `# LINE:COL` marker system) | — |
 
 This contract is pinned by `GDShrapt.CLI.Tests/Handlers/GDPositionContractTests.cs`. A planned
@@ -139,6 +140,15 @@ tests) and cosmetic (outputs are correct today). Any such change must update tha
 every consumer in the same commit.
 
 See `Analysis/CLAUDE.md` for the AST/SemanticModel/LSP/Plugin position table.
+
+## Document Symbols
+
+`GDSymbolsHandler.GetSymbols` builds symbols from the script's own AST: class members and inner classes
+(recursively, as `Children`) — methods, variables (incl. static/`@export`/`@onready`/properties with get/set),
+constants, signals, enums (anonymous enum = empty name, LSP reports `enum`), inner classes. Locals, parameters
+and inherited engine members are never included. `Type` is the declaration signature (`static func make() ->
+Constructs`, `signal hit(damage: int, source: Node)`, `const MAX_HP: int`). Built-in type files keep the
+model-based extraction.
 
 ## Known Limitations
 

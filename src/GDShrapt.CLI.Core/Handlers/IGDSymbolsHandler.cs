@@ -66,19 +66,30 @@ public class GDDocumentSymbol
     public required GDSymbolKind Kind { get; init; }
 
     /// <summary>
-    /// Type annotation if available.
+    /// Declaration signature for project scripts (e.g. <c>func f(x: int) -> String</c>,
+    /// <c>signal hit(damage: int)</c>, <c>const MAX_HP: int</c>); type annotation for built-in type files.
     /// </summary>
     public string? Type { get; init; }
 
     /// <summary>
-    /// Line number (1-based).
+    /// Line of the symbol's identifier (1-based).
     /// </summary>
     public int Line { get; init; }
 
     /// <summary>
-    /// Column number (1-based).
+    /// Column of the symbol's identifier (1-based).
     /// </summary>
     public int Column { get; init; }
+
+    /// <summary>
+    /// Last line of the whole declaration, body included (1-based). 0 when unknown.
+    /// </summary>
+    public int EndLine { get; init; }
+
+    /// <summary>
+    /// End column (exclusive) on <see cref="EndLine"/> (1-based). 0 when unknown.
+    /// </summary>
+    public int EndColumn { get; init; }
 
     /// <summary>
     /// Child symbols (e.g., methods inside a class).

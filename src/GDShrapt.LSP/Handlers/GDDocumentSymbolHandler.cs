@@ -40,16 +40,19 @@ public class GDDocumentSymbolHandler
 
     private static GDLspDocumentSymbol ConvertToLspSymbol(GDDocumentSymbol symbol)
     {
-        // Create range using line/column info (convert 1-based to 0-based, clamp to >= 0)
+        // CLI.Core positions are 1-based; LSP is 0-based. Range = whole declaration, SelectionRange = name.
         var line = Math.Max(0, symbol.Line - 1);
         var column = Math.Max(0, symbol.Column - 1);
+        var endLine = symbol.EndLine > 0 ? Math.Max(line, symbol.EndLine - 1) : line;
+        var endColumn = symbol.EndLine > 0 ? Math.Max(0, symbol.EndColumn - 1) : column + symbol.Name.Length;
 
         var lspSymbol = new GDLspDocumentSymbol
         {
-            Name = symbol.Name,
+            // LSP forbids empty names: anonymous enums are reported as "enum".
+            Name = string.IsNullOrEmpty(symbol.Name) && symbol.Kind == GDSymbolKind.Enum ? "enum" : symbol.Name,
             Kind = ConvertSymbolKind(symbol.Kind),
             Detail = symbol.Type,
-            Range = new GDLspRange(line, 0, line, column + symbol.Name.Length),
+            Range = new GDLspRange(line, 0, endLine, endColumn),
             SelectionRange = new GDLspRange(line, column, line, column + symbol.Name.Length)
         };
 
