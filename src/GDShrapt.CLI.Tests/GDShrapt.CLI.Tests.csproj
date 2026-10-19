@@ -26,4 +26,8 @@
     <ProjectReference Include="..\GDShrapt.CLI.Core\GDShrapt.CLI.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Include="..\GDShrapt.Semantics.Tests\Helpers\GDTempProject.cs" Link="Helpers\GDTempProject.cs" />
+  </ItemGroup>
+
 </Project>

@@ -235,13 +235,13 @@ public class GDDiagnosticPublisher : IAsyncDisposable
         var script = _project.GetScript(filePath);
 
         // Rebuild semantic model if it was cleared by Reload (e.g. after didChange)
-        if (script != null && script.SemanticModel == null && _projectModel != null)
+        if (script != null && script.CurrentSemanticModel == null && _projectModel != null)
         {
             GDLspPerformanceTrace.Log("diagnostics", $"REBUILD-MODEL {filename}");
             var rebuildSw = System.Diagnostics.Stopwatch.StartNew();
             _projectModel.GetSemanticModel(script);
             rebuildSw.Stop();
-            GDLspPerformanceTrace.Log("diagnostics", $"REBUILD-DONE {filename} {rebuildSw.ElapsedMilliseconds}ms hasModel={script.SemanticModel != null}");
+            GDLspPerformanceTrace.Log("diagnostics", $"REBUILD-DONE {filename} {rebuildSw.ElapsedMilliseconds}ms hasModel={script.CurrentSemanticModel != null}");
         }
 
         GDLspDiagnostic[] diagnostics;
@@ -277,7 +277,7 @@ public class GDDiagnosticPublisher : IAsyncDisposable
             .ConfigureAwait(false);
 
         sw.Stop();
-        GDLspPerformanceTrace.Log("diagnostics", $"END {filename} diagnose={diagnoseMs}ms total={sw.ElapsedMilliseconds}ms hasModel={script?.SemanticModel != null} count={diagnostics.Length}");
+        GDLspPerformanceTrace.Log("diagnostics", $"END {filename} diagnose={diagnoseMs}ms total={sw.ElapsedMilliseconds}ms hasModel={script?.CurrentSemanticModel != null} count={diagnostics.Length}");
     }
 
     /// <summary>

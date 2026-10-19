@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
 
 namespace GDShrapt.Semantics;
 
@@ -44,7 +45,31 @@ public class GDScriptFile : IGDScriptInfo
     /// The semantic model for this script.
     /// Provides unified access to symbols, references, type inference, and semantic analysis.
     /// </summary>
-    public GDSemanticModel? SemanticModel { get; private set; }
+    public GDSemanticModel? SemanticModel
+    {
+        get
+        {
+            var model = Volatile.Read(ref _semanticModel);
+            if (model != null || ModelFactory == null || Class == null)
+                return model;
+            return ModelFactory(this);   // the factory serializes builds and guards re-entrancy
+        }
+        private set => Volatile.Write(ref _semanticModel, value);
+    }
+
+    private GDSemanticModel? _semanticModel;
+
+    /// <summary>
+    /// The current semantic model without any lazy rebuild (null right after <see cref="Reload()"/>).
+    /// For callers that build models themselves (<see cref="GDProjectSemanticModel"/>, diagnostics).
+    /// </summary>
+    public GDSemanticModel? CurrentSemanticModel => Volatile.Read(ref _semanticModel);
+
+    /// <summary>
+    /// Lazy model factory assigned by <see cref="GDProjectSemanticModel.AttachScript"/>; when set, reading
+    /// <see cref="SemanticModel"/> after a reload rebuilds the model synchronously.
+    /// </summary>
+    internal Func<GDScriptFile, GDSemanticModel?>? ModelFactory { get; set; }
 
     /// <summary>
     /// Whether this script is global (has class_name).
@@ -213,8 +238,9 @@ public class GDScriptFile : IGDScriptInfo
 
         try
         {
-            SemanticModel = GDSemanticModel.Create(this, runtimeProvider, typeInjector, callSiteRegistry);
-            _logger.Debug($"Analysis complete: {SemanticModel.Symbols.Count()} symbols found");
+            var model = GDSemanticModel.Create(this, runtimeProvider, typeInjector, callSiteRegistry);
+            SemanticModel = model;
+            _logger.Debug($"Analysis complete: {model.Symbols.Count()} symbols found");
         }
         catch (Exception ex)
         {
@@ -260,7 +286,7 @@ public class GDScriptFile : IGDScriptInfo
                 CheckTypes = true,
                 CheckCalls = true,
                 CheckControlFlow = true,
-                RuntimeProvider = SemanticModel?.RuntimeProvider
+                RuntimeProvider = CurrentSemanticModel?.RuntimeProvider
             };
 
             return validator.Validate(Class, options);

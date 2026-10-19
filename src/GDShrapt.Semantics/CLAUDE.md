@@ -89,6 +89,18 @@ Centralized constants for Godot type names, functions, and compatibility rules:
 
 **Rule:** Never hardcode Godot type or function names as string literals. Always use constants from these files.
 
+## Lazy Model Rebuild (GDScriptFile)
+
+- `GDScriptFile.Reload()` clears the model. When a `GDProjectSemanticModel` is attached (`AttachScript`, done for
+  every script in its constructor), reading `SemanticModel` rebuilds it synchronously on demand — consumers
+  never see a null/stale model right after didOpen/didChange/didClose.
+- `CurrentSemanticModel` is the raw accessor (no rebuild): use it inside code that builds models itself
+  (`GDProjectSemanticModel`, `GDDiagnosticPublisher`, `GDScriptFile.Validate`).
+- `GetSemanticModel` / `TryGetCachedSemanticModel` drop a `_fileModels` entry whose script was reloaded since
+  caching (`CurrentSemanticModel == null`) instead of returning the model of the old AST.
+- Lazy builds are serialized by one project-wide lock; a re-entrant read of a script being built on the same
+  thread returns null (no recursion). A script without an attached project model behaves as before (null).
+
 ## Thread Safety
 
 `GDProjectSemanticModel` lazy properties use `Lazy<T>` for thread-safe initialization:

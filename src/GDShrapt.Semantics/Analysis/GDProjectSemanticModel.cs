@@ -207,6 +207,67 @@ public class GDProjectSemanticModel : IDisposable
         {
             _project.IncrementalChange += OnIncrementalChange;
         }
+
+        foreach (var file in _project.ScriptFiles)
+            AttachScript(file);
+    }
+
+    // ========================================
+    // Lazy model rebuild (D1/D2)
+    // ========================================
+
+    private readonly object _lazyBuildLock = new();
+
+    [ThreadStatic]
+    private static HashSet<GDScriptFile>? _building;
+
+    /// <summary>
+    /// Test seam: invoked inside a lazy build, before analysis, with the script being built.
+    /// </summary>
+    internal Action<GDScriptFile>? LazyBuildHook { get; set; }
+
+    /// <summary>
+    /// Gives a script the lazy model factory, so reading <see cref="GDScriptFile.SemanticModel"/> after a
+    /// reload rebuilds it on demand. Called for the initial scripts and for scripts added later.
+    /// </summary>
+    public void AttachScript(GDScriptFile file)
+    {
+        if (file != null)
+            file.ModelFactory = BuildModelFor;
+    }
+
+    /// <summary>
+    /// Builds a script's model on demand. One project-wide lock serializes lazy builds (no lock-order
+    /// deadlock when building A reads B and B reads A); a re-entrant read of a script that this thread is
+    /// already building returns null instead of recursing.
+    /// </summary>
+    private GDSemanticModel? BuildModelFor(GDScriptFile file)
+    {
+        lock (_lazyBuildLock)
+        {
+            var model = file.CurrentSemanticModel;
+            if (model != null)
+                return model;
+
+            _building ??= new HashSet<GDScriptFile>();
+            if (!_building.Add(file))
+                return null;
+
+            try
+            {
+                LazyBuildHook?.Invoke(file);
+                file.Analyze(RuntimeProvider, _project.CreateNodeTypeInjector(), _project.CallSiteRegistry);
+                model = file.CurrentSemanticModel;
+                var path = file.FullPath ?? file.Reference?.FullPath;
+                if (model != null && !string.IsNullOrEmpty(path))
+                    _fileModels[path] = model;
+                return model;
+            }
+            finally
+            {
+                _building.Remove(file);
+            }
+        }
     }
 
     /// <summary>
@@ -649,7 +710,18 @@ public class GDProjectSemanticModel : IDisposable
             return null;
 
         if (_fileModels.TryGetValue(path, out var cached))
-            return cached;
+        {
+            var current = scriptFile.CurrentSemanticModel;
+            if (current == null)
+            {
+                // Reloaded since caching: never serve the model of the old AST.
+                _fileModels.TryRemove(path, out _);
+                return scriptFile.SemanticModel;
+            }
+            if (!ReferenceEquals(cached, current))
+                _fileModels[path] = current;
+            return current;
+        }
 
         return scriptFile.SemanticModel;
     }
@@ -673,19 +745,31 @@ public class GDProjectSemanticModel : IDisposable
         {
             // Detect stale cache: if the script was re-analyzed externally,
             // its SemanticModel differs from what we cached.
-            if (scriptFile.SemanticModel != null && !ReferenceEquals(cached, scriptFile.SemanticModel))
+            var current = scriptFile.CurrentSemanticModel;
+            if (current == null)
             {
-                cached = scriptFile.SemanticModel;
-                _fileModels[path] = cached;
+                // Reloaded since caching: drop the stale entry and rebuild below.
+                _fileModels.TryRemove(path, out _);
             }
-            return cached;
+            else
+            {
+                if (!ReferenceEquals(cached, current))
+                {
+                    cached = current;
+                    _fileModels[path] = cached;
+                }
+                return cached;
+            }
         }
 
         // Slow path: analyze outside of GetOrAdd to avoid blocking other threads
-        if (scriptFile.SemanticModel == null)
+        if (scriptFile.CurrentSemanticModel == null)
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            scriptFile.Analyze(RuntimeProvider, _project.CreateNodeTypeInjector(), _project.CallSiteRegistry);
+            if (scriptFile.ModelFactory != null)
+                _ = scriptFile.SemanticModel;   // single-flight lazy build
+            else
+                scriptFile.Analyze(RuntimeProvider, _project.CreateNodeTypeInjector(), _project.CallSiteRegistry);
             sw.Stop();
             if (sw.ElapsedMilliseconds > 100)
             {
@@ -694,7 +778,7 @@ public class GDProjectSemanticModel : IDisposable
             }
         }
 
-        var model = scriptFile.SemanticModel;
+        var model = scriptFile.CurrentSemanticModel;
         if (model != null)
             _fileModels[path] = model;
 
@@ -1509,6 +1593,11 @@ public class GDProjectSemanticModel : IDisposable
             {
                 if (_subscribeToChanges)
                     _project.IncrementalChange -= OnIncrementalChange;
+
+                Func<GDScriptFile, GDSemanticModel?> factory = BuildModelFor;
+                foreach (var file in _project.ScriptFiles)
+                    if (file.ModelFactory == factory)
+                        file.ModelFactory = null;
 
                 foreach (var cts in _pendingInvalidations.Values)
                 {
