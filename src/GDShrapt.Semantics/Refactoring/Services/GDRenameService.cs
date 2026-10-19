@@ -94,6 +94,38 @@ public class GDRenameService
             sortedStrict, sortedPotential, filesModified.Count, warnings);
     }
 
+    private GDRenameResult? TryPlanAutoloadRename(string oldName, string newName, string? filterFilePath)
+    {
+        if (!_project.AutoloadEntries.Any(a => a.Enabled && a.Name == oldName))
+            return null;
+
+        if (!string.IsNullOrEmpty(filterFilePath))
+        {
+            var filterScript = _project.GetScript(filterFilePath);
+            var declaredThere = filterScript != null && _projectModel?.ResolveModel(filterScript)?.FindSymbol(oldName) is { DeclarationNode: not null };
+            if (declaredThere)
+                return null;   // the user is renaming a script symbol with the same name
+        }
+
+        var refs = new GDSymbolReferenceCollector(_project, _projectModel).TryCollectAutoloadReferences(oldName);
+        if (refs == null)
+            return null;
+
+        var strictEdits = new List<GDTextEdit>();
+        var potentialEdits = new List<GDTextEdit>();
+        var filesModified = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        ConvertRefsToEdits(refs, oldName, newName, null, null, strictEdits, potentialEdits, filesModified);
+
+        if (strictEdits.Count == 0 && potentialEdits.Count == 0)
+            return GDRenameResult.NoOccurrences(oldName);
+
+        strictEdits = DeduplicateEdits(strictEdits);
+        potentialEdits = DeduplicateEdits(potentialEdits);
+        RemoveStrictDuplicatesFromPotential(strictEdits, potentialEdits);
+        return GDRenameResult.SuccessfulWithConfidence(
+            SortEditsReverse(strictEdits), SortEditsReverse(potentialEdits), filesModified.Count, refs.StringWarnings.ToList());
+    }
+
     private static void AddRefsToEdits(
         IEnumerable<(string? FilePath, int Line, int Column, string? Reason)> references,
         List<GDTextEdit> edits,
@@ -165,6 +197,12 @@ public class GDRenameService
         // Validate the new name
         if (!ValidateIdentifier(newName, out var validationError))
             return GDRenameResult.Failed(validationError!);
+
+        // Autoload singleton name (declared in project.godot, not in the filter script): rename the
+        // project.godot key and every unshadowed use.
+        var autoloadPlan = TryPlanAutoloadRename(oldName, newName, filterFilePath);
+        if (autoloadPlan != null)
+            return autoloadPlan;
 
         // If filterFilePath is specified, try to find the symbol and use the full PlanRename(symbol, newName) path
         if (!string.IsNullOrEmpty(filterFilePath))

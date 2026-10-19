@@ -120,6 +120,13 @@ types come from one resolver, `GDProjectSemanticModel.ResolveSceneNodeTypeName(s
 instanced sub-scene node by its root script. `GDRenameService.CollectTscnEdits` edits `method="..."` (typed by the
 TO node) and `signal="..."` (typed by the FROM node); Strict when compatible, Potential when the type is unknown.
 
+**Autoload singletons (0ics D5).** A name declared only in `project.godot` `[autoload] name="*res://..."` has
+references: the project.godot key (`Declaration`, located by `GDProjectGodotLocator`, script wrapped like `.tscn`
+hits) plus every identifier with that name not resolved by the script's model to a local/member/parameter
+(`GDSymbolReferenceCollector.TryCollectAutoloadReferences`). Entries without `*` are not global names.
+`GDRenameService.PlanRename(name, …)` takes this path first (unless the filter script declares the name) and
+edits the project.godot key and the uses.
+
 ### GDCrossFileReferenceFinder
 
 Finds references across project files.

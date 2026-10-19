@@ -59,9 +59,72 @@ public class GDSymbolReferenceCollector
         }
 
         if (symbol == null)
-            return Empty(symbolName);
+        {
+            // An autoload singleton name (project.godot [autoload] name="*res://...") is declared in
+            // project.godot, not in any script.
+            return TryCollectAutoloadReferences(symbolName) ?? Empty(symbolName);
+        }
 
         return CollectReferences(symbol, declaringScript);
+    }
+
+    /// <summary>
+    /// References to an autoload singleton name: the project.godot key (Declaration) plus every identifier with
+    /// that name that the script's model does not resolve to a local/member/parameter (Strict reads).
+    /// </summary>
+    public GDSymbolReferences? TryCollectAutoloadReferences(string name)
+    {
+        var autoload = _project.AutoloadEntries.FirstOrDefault(a => a.Enabled && a.Name == name);
+        return autoload != null ? CollectAutoloadReferences(autoload) : null;
+    }
+
+    private GDSymbolReferences CollectAutoloadReferences(GDAutoloadEntry autoload)
+    {
+        var refs = new List<GDSymbolReference>();
+
+        var projectGodot = Path.Combine(_project.ProjectPath, "project.godot");
+        var key = GDProjectGodotLocator.FindKey(projectGodot, "autoload", autoload.Name);
+        if (key != null)
+        {
+            refs.Add(new GDSymbolReference(
+                new GDScriptFile(new GDScriptReference(projectGodot)), null, null,
+                key.Value.Line - 1, key.Value.Column - 1,
+                GDReferenceConfidence.Strict, "autoload declaration in project.godot",
+                GDSymbolReferenceKind.Declaration));
+        }
+
+        foreach (var script in _project.ScriptFiles)
+        {
+            if (script.Class == null)
+                continue;
+
+            var model = script.SemanticModel;
+            foreach (var id in script.Class.AllTokens.OfType<GDIdentifier>())
+            {
+                if (id.Sequence != autoload.Name)
+                    continue;
+
+                // obj.global is a member named like the autoload, not the autoload itself
+                if (id.Parent is GDMemberOperatorExpression member && ReferenceEquals(member.Identifier, id))
+                    continue;
+
+                // shadowed by a local / parameter / member of this script
+                if (model?.GetSymbolAtPosition(id.StartLine, id.StartColumn) is { DeclarationNode: not null })
+                    continue;
+
+                refs.Add(new GDSymbolReference(
+                    script, id.Parent as GDNode, id,
+                    id.StartLine, id.StartColumn,
+                    GDReferenceConfidence.Strict, "autoload singleton",
+                    GDSymbolReferenceKind.Read));
+            }
+        }
+
+        return new GDSymbolReferences(
+            new GDSymbolInfo(autoload.Name, GDSymbolKind.Variable, null, ""),
+            null,
+            refs,
+            Array.Empty<GDRenameWarning>());
     }
 
     /// <summary>
