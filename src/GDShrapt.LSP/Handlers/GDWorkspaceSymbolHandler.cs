@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using GDShrapt.Reader;
@@ -7,8 +8,9 @@ using GDShrapt.Semantics;
 namespace GDShrapt.LSP;
 
 /// <summary>
-/// Handles workspace/symbol requests: project-wide symbol search across all loaded scripts.
-/// Extracted from the server so it is testable and keeps the server a pure dispatcher.
+/// Handles workspace/symbol requests: every script's class_name class, its members and inner classes, and the
+/// autoload singletons declared in project.godot. Locations point at the identifier (the position clients use
+/// for references/rename/hierarchy).
 /// </summary>
 public class GDWorkspaceSymbolHandler
 {
@@ -24,70 +26,74 @@ public class GDWorkspaceSymbolHandler
         var query = @params.Query?.ToLowerInvariant() ?? "";
         var results = new List<GDLspSymbolInformation>();
 
+        void Add(string? name, GDLspSymbolKind kind, string uri, int line, int column, string? container = null)
+        {
+            if (string.IsNullOrEmpty(name) || (query.Length > 0 && !name.ToLowerInvariant().Contains(query)))
+                return;
+            results.Add(new GDLspSymbolInformation
+            {
+                Name = name,
+                Kind = kind,
+                ContainerName = container,
+                Location = new GDLspLocation
+                {
+                    Uri = uri,
+                    Range = new GDLspRange(line, column, line, column + name.Length)
+                }
+            });
+        }
+
         foreach (var script in _project.ScriptFiles)
         {
             if (script.Class == null || script.FullPath == null)
                 continue;
 
             var uri = GDDocumentManager.PathToUri(script.FullPath);
+            var className = script.Class.ClassName?.Identifier;
+            if (className != null)
+                Add(className.Sequence, GDLspSymbolKind.Class, uri, className.StartLine, className.StartColumn);
 
-            foreach (var member in script.Class.Members)
-            {
-                string? name = null;
-                var kind = GDLspSymbolKind.Variable;
-                var line = 0;
+            AddMembers(script.Class.Members, uri, className?.Sequence, Add);
+        }
 
-                if (member is GDMethodDeclaration method)
-                {
-                    name = method.Identifier?.ToString();
-                    kind = GDLspSymbolKind.Method;
-                    line = method.StartLine;
-                }
-                else if (member is GDVariableDeclaration variable)
-                {
-                    name = variable.Identifier?.ToString();
-                    kind = variable.IsConstant ? GDLspSymbolKind.Constant : GDLspSymbolKind.Variable;
-                    line = variable.StartLine;
-                }
-                else if (member is GDSignalDeclaration signal)
-                {
-                    name = signal.Identifier?.ToString();
-                    kind = GDLspSymbolKind.Event;
-                    line = signal.StartLine;
-                }
-                else if (member is GDEnumDeclaration enumDecl)
-                {
-                    name = enumDecl.Identifier?.ToString();
-                    kind = GDLspSymbolKind.Enum;
-                    line = enumDecl.StartLine;
-                }
-                else if (member is GDInnerClassDeclaration innerClass)
-                {
-                    name = innerClass.Identifier?.ToString();
-                    kind = GDLspSymbolKind.Class;
-                    line = innerClass.StartLine;
-                }
-
-                if (name != null && (string.IsNullOrEmpty(query) || name.ToLowerInvariant().Contains(query)))
-                {
-                    results.Add(new GDLspSymbolInformation
-                    {
-                        Name = name,
-                        Kind = kind,
-                        Location = new GDLspLocation
-                        {
-                            Uri = uri,
-                            Range = new GDLspRange
-                            {
-                                Start = new GDLspPosition { Line = line, Character = 0 },
-                                End = new GDLspPosition { Line = line, Character = 0 }
-                            }
-                        }
-                    });
-                }
-            }
+        // Autoload singletons are declared in project.godot, not in any script.
+        var projectGodot = Path.Combine(_project.ProjectPath, "project.godot");
+        if (File.Exists(projectGodot))
+        {
+            var uri = GDDocumentManager.PathToUri(projectGodot);
+            foreach (var (key, line, column) in GDProjectGodotLocator.Keys(projectGodot, "autoload"))
+                Add(key, GDLspSymbolKind.Variable, uri, line - 1, column - 1, "autoload");
         }
 
         return Task.FromResult<GDLspSymbolInformation[]?>(results.ToArray());
+    }
+
+    private delegate void AddSymbol(string? name, GDLspSymbolKind kind, string uri, int line, int column, string? container);
+
+    private static void AddMembers(IEnumerable<GDClassMember> members, string uri, string? container, AddSymbol add)
+    {
+        foreach (var member in members)
+        {
+            switch (member)
+            {
+                case GDMethodDeclaration m when m.Identifier != null:
+                    add(m.Identifier.Sequence, GDLspSymbolKind.Method, uri, m.Identifier.StartLine, m.Identifier.StartColumn, container);
+                    break;
+                case GDVariableDeclaration v when v.Identifier != null:
+                    add(v.Identifier.Sequence, v.IsConstant ? GDLspSymbolKind.Constant : GDLspSymbolKind.Variable,
+                        uri, v.Identifier.StartLine, v.Identifier.StartColumn, container);
+                    break;
+                case GDSignalDeclaration s when s.Identifier != null:
+                    add(s.Identifier.Sequence, GDLspSymbolKind.Event, uri, s.Identifier.StartLine, s.Identifier.StartColumn, container);
+                    break;
+                case GDEnumDeclaration e when e.Identifier != null:
+                    add(e.Identifier.Sequence, GDLspSymbolKind.Enum, uri, e.Identifier.StartLine, e.Identifier.StartColumn, container);
+                    break;
+                case GDInnerClassDeclaration c when c.Identifier != null:
+                    add(c.Identifier.Sequence, GDLspSymbolKind.Class, uri, c.Identifier.StartLine, c.Identifier.StartColumn, container);
+                    AddMembers(c.Members, uri, c.Identifier.Sequence, add);
+                    break;
+            }
+        }
     }
 }

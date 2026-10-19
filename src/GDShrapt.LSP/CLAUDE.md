@@ -30,7 +30,8 @@ They convert LSP protocol (0-based positions) to CLI.Core (1-based positions).
 | `GDLspFoldingRangeHandler` | `IGDFoldingRangeHandler` | textDocument/foldingRange |
 | `GDLspCodeLensHandler` | `IGDCodeLensHandler` | textDocument/codeLens |
 | `GDCodeLensReferencesHandler` | `IGDCodeLensHandler` + `IGDFindRefsHandler` | gdshrapt/codeLensReferences |
-| `GDWorkspaceSymbolHandler` | (project AST scan) | workspace/symbol |
+| `GDWorkspaceSymbolHandler` | (project AST scan) | workspace/symbol (class_name classes, members, inner classes at the identifier; `[autoload]` keys at project.godot) |
+| `GDTypeHierarchyHandler` | (project scripts + runtime provider) | textDocument/prepareTypeHierarchy, typeHierarchy/supertypes, typeHierarchy/subtypes |
 | `GDLspSelectionRangeHandler` | `IGDSelectionRangeHandler` | textDocument/selectionRange |
 | `GDLspDocumentLinkHandler` | `IGDDocumentLinkHandler` | textDocument/documentLink |
 | `GDRangeFormattingHandler` | `IGDFormatHandler` | textDocument/rangeFormatting |
@@ -84,6 +85,7 @@ int lspCharacter = cliColumn - 1;
   invalidate cached models; scripts created by the watcher get the lazy model factory (`ScriptCreated`).
 - `didOpen` of a `.gd` under the project root that the project does not know yet adds it (`AddScript`).
 - Scene `SceneChanged` refreshes that scene's entries in `SignalConnectionRegistry` (scene references).
+- A cursor on an `[autoload]` key of `project.godot` resolves to that autoload name (references, rename).
 
 ## Diagnostics Trace & Paths
 

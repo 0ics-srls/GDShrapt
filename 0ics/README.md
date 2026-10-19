@@ -44,3 +44,4 @@ git checkout main-0ics && git merge main                  # resolve conflicts, r
 | D4b/D4c | `.tscn` connections are references for signal and callback; instanced sub-scene typing; rename of `signal=`/`method=`. |
 | D5 | References and rename for autoload singleton names (project.godot key + uses). |
 | D8d-f | Opt-in trace (`GDSHRAPT_LSP_TRACE`), OS-aware path comparison, no cross-assignment for same-named scripts. |
+| 7.2 | `.tscn` node headers parsed in any attribute order (Godot 4.4+ `unique_id=` before `instance=`); workspace/symbol complete with identifier positions, class_name classes and autoload keys; project.godot autoload key as a references/rename cursor; type hierarchy (prepare/supertypes/subtypes, engine chain via the runtime provider). |

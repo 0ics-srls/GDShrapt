@@ -46,6 +46,10 @@ public class GDSceneTypesProvider : IGDRuntimeProvider, IDisposable
 
     #endregion
 
+    private static readonly Regex NodeTypeAttrRegex = new(@"\stype=""([^""]+)""", RegexOptions.Compiled);
+    private static readonly Regex NodeParentAttrRegex = new(@"\sparent=""([^""]*)""", RegexOptions.Compiled);
+    private static readonly Regex NodeInstanceAttrRegex = new(@"\sinstance=ExtResource\(\s*""?([^"")\s]+)""?\s*\)", RegexOptions.Compiled);
+
     public GDSceneTypesProvider(string projectPath, IGDFileSystem? fileSystem = null, IGDLogger? logger = null)
     {
         _projectPath = projectPath ?? throw new ArgumentNullException(nameof(projectPath));
@@ -288,21 +292,22 @@ public class GDSceneTypesProvider : IGDRuntimeProvider, IDisposable
         // Parse nodes with line numbers
         // Captures: name, type (optional), parent (optional), instance ExtResource id (optional)
         // In .tscn format, instance nodes may have no type= attribute; attributes can appear in any order
-        var nodeRegex = new Regex(
-            @"\[node\s+name=""([^""]+)""" +
-            @"(?:\s+type=""([^""]+)"")?" +
-            @"(?:\s+parent=""([^""]*)"")?" +
-            @"(?:\s+instance=ExtResource\(\s*""?([^"")\s]+)""?\s*\))?" +
-            @"[^\]]*\]", RegexOptions.Multiline);
+        // Attributes are read individually from the header: Godot 4.4+ writes unique_id= / parent_id_path= /
+        // index= between parent= and instance=, so a fixed attribute order would miss instance=.
+        var nodeRegex = new Regex(@"\[node\s+name=""([^""]+)""[^\]]*\]", RegexOptions.Multiline);
         var rootPath = "";
         var subSceneRefs = new List<GDSubSceneReference>();
 
         foreach (Match match in nodeRegex.Matches(content))
         {
             var name = match.Groups[1].Value;
-            var type = match.Groups[2].Success ? match.Groups[2].Value : "Node";
-            var parent = match.Groups[3].Success ? match.Groups[3].Value : "";
-            var instanceId = match.Groups[4].Success ? match.Groups[4].Value : null;
+            var header = match.Value;
+            var typeMatch = NodeTypeAttrRegex.Match(header);
+            var parentMatch = NodeParentAttrRegex.Match(header);
+            var instanceMatch = NodeInstanceAttrRegex.Match(header);
+            var type = typeMatch.Success ? typeMatch.Groups[1].Value : "Node";
+            var parent = parentMatch.Success ? parentMatch.Groups[1].Value : "";
+            var instanceId = instanceMatch.Success ? instanceMatch.Groups[1].Value : null;
 
             // Calculate line number from match position
             var lineNumber = content.Substring(0, match.Index).Count(c => c == '\n') + 1;

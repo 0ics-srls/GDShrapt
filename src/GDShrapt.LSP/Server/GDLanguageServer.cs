@@ -111,6 +111,11 @@ public class GDLanguageServer : IGDLanguageServer
         _transport.OnRequest<GDCallHierarchyIncomingCallsParams, GDLspCallHierarchyIncomingCall[]?>("callHierarchy/incomingCalls", HandleIncomingCallsAsync);
         _transport.OnRequest<GDCallHierarchyOutgoingCallsParams, GDLspCallHierarchyOutgoingCall[]?>("callHierarchy/outgoingCalls", HandleOutgoingCallsAsync);
 
+        // Type hierarchy
+        _transport.OnRequest<GDTypeHierarchyPrepareParams, GDLspTypeHierarchyItem[]?>("textDocument/prepareTypeHierarchy", (p, ct) => TypeHierarchy()?.PrepareAsync(p, ct) ?? Task.FromResult<GDLspTypeHierarchyItem[]?>(null));
+        _transport.OnRequest<GDTypeHierarchyItemParams, GDLspTypeHierarchyItem[]?>("typeHierarchy/supertypes", (p, ct) => TypeHierarchy()?.SupertypesAsync(p, ct) ?? Task.FromResult<GDLspTypeHierarchyItem[]?>(null));
+        _transport.OnRequest<GDTypeHierarchyItemParams, GDLspTypeHierarchyItem[]?>("typeHierarchy/subtypes", (p, ct) => TypeHierarchy()?.SubtypesAsync(p, ct) ?? Task.FromResult<GDLspTypeHierarchyItem[]?>(null));
+
         // Type definition and implementation
         _transport.OnRequest<GDDefinitionParams, GDLspLocationLink[]?>("textDocument/typeDefinition", HandleTypeDefinitionAsync);
         _transport.OnRequest<GDDefinitionParams, GDLspLocation[]?>("textDocument/implementation", HandleImplementationAsync);
@@ -248,6 +253,7 @@ public class GDLanguageServer : IGDLanguageServer
                     Full = true
                 },
                 CallHierarchyProvider = true,
+                TypeHierarchyProvider = true,
                 TypeDefinitionProvider = true,
                 ImplementationProvider = true,
                 WorkspaceSymbolProvider = true,
@@ -493,6 +499,10 @@ public class GDLanguageServer : IGDLanguageServer
             await _diagnosticPublisher.PublishAllAsync(_documentManager).ConfigureAwait(false);
         }
     }
+
+    private GDTypeHierarchyHandler? TypeHierarchy() =>
+        _project == null ? null
+            : new GDTypeHierarchyHandler(_project, _registry?.GetService<GDProjectSemanticModel>()?.RuntimeProvider);
 
     private Task<GDLspSymbolInformation[]?> HandleWorkspaceSymbolAsync(GDWorkspaceSymbolParams @params, CancellationToken ct)
     {

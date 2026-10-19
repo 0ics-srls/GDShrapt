@@ -12,6 +12,44 @@ public static class GDProjectGodotLocator
     /// Returns the 1-based line and column of <paramref name="key"/> in <c>[section]</c>, or null.
     /// The same key text in other sections is ignored.
     /// </summary>
+    /// <summary>
+    /// All keys of <c>[section]</c> with their 1-based line/column, in file order.
+    /// </summary>
+    public static System.Collections.Generic.IReadOnlyList<(string Key, int Line, int Column)> Keys(string projectGodotPath, string section)
+    {
+        var result = new System.Collections.Generic.List<(string, int, int)>();
+        string[] lines;
+        try { lines = File.ReadAllLines(projectGodotPath); }
+        catch (IOException) { return result; }
+        catch (UnauthorizedAccessException) { return result; }
+
+        var header = "[" + section + "]";
+        var inSection = false;
+        for (var i = 0; i < lines.Length; i++)
+        {
+            var trimmed = lines[i].Trim();
+            if (trimmed.StartsWith("[", StringComparison.Ordinal)) { inSection = trimmed == header; continue; }
+            if (!inSection) continue;
+            var eq = lines[i].IndexOf('=');
+            if (eq <= 0) continue;
+            var key = lines[i].Substring(0, eq).Trim();
+            if (key.Length == 0 || key.StartsWith(";", StringComparison.Ordinal)) continue;
+            result.Add((key, i + 1, lines[i].IndexOf(key, StringComparison.Ordinal) + 1));
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// The key of <c>[section]</c> declared on the given 0-based line, or null.
+    /// </summary>
+    public static string? KeyAtLine(string projectGodotPath, string section, int line0)
+    {
+        foreach (var (key, line, _) in Keys(projectGodotPath, section))
+            if (line - 1 == line0)
+                return key;
+        return null;
+    }
+
     public static (int Line, int Column)? FindKey(string projectGodotPath, string section, string key)
     {
         string[] lines;

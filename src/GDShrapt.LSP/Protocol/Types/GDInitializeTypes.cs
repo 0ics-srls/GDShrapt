@@ -296,6 +296,12 @@ public class GDServerCapabilities
     public bool? CallHierarchyProvider { get; set; }
 
     /// <summary>
+    /// The server provides type hierarchy support.
+    /// </summary>
+    [JsonPropertyName("typeHierarchyProvider")]
+    public bool? TypeHierarchyProvider { get; set; }
+
+    /// <summary>
     /// The server provides type definition support.
     /// </summary>
     [JsonPropertyName("typeDefinitionProvider")]
