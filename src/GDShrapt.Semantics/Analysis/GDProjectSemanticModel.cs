@@ -332,17 +332,40 @@ public class GDProjectSemanticModel : IDisposable
                 sceneInfo.FullPath,
                 conn.LineNumber,
                 conn.MethodColumn,
-                ResolveSceneNodeTypeName(fromNode) ?? conn.SourceNodeType ?? "",
+                ResolveSceneNodeTypeName(sceneInfo, fromNode) ?? conn.SourceNodeType ?? "",
                 conn.SignalName,
-                ResolveSceneNodeTypeName(toNode) ?? "",
+                ResolveSceneNodeTypeName(sceneInfo, toNode) ?? "",
                 conn.Method));
         }
     }
 
-    private string? ResolveSceneNodeTypeName(GDNodeTypeInfo? node)
+    /// <summary>
+    /// Script type of a scene node: its own script; for an instance of a sub-scene (`instance=ExtResource(...)`),
+    /// the script type of that sub-scene's root node (recursively); otherwise the node type.
+    /// </summary>
+    internal string? ResolveSceneNodeTypeName(GDSceneInfo scene, GDNodeTypeInfo? node) =>
+        ResolveSceneNodeTypeName(scene, node, 0);
+
+    private string? ResolveSceneNodeTypeName(GDSceneInfo scene, GDNodeTypeInfo? node, int depth)
     {
         if (node == null)
             return null;
+
+        if (string.IsNullOrEmpty(node.ScriptPath) && depth < 8)
+        {
+            var sub = scene.SubSceneReferences.FirstOrDefault(r => r.NodePath == node.Path);
+            var provider = _project.SceneTypesProvider;
+            if (sub != null && provider != null && !string.IsNullOrEmpty(sub.SubScenePath))
+            {
+                if (provider.GetSceneInfo(sub.SubScenePath) == null)
+                    provider.LoadScene(sub.SubScenePath);
+                var subScene = provider.GetSceneInfo(sub.SubScenePath);
+                var root = subScene?.Nodes.FirstOrDefault(n => string.IsNullOrEmpty(n.ParentPath));
+                var resolved = subScene != null ? ResolveSceneNodeTypeName(subScene, root, depth + 1) : null;
+                if (!string.IsNullOrEmpty(resolved))
+                    return resolved;
+            }
+        }
 
         // Resolve ScriptPath to actual TypeName from loaded scripts (RC4)
         if (!string.IsNullOrEmpty(node.ScriptPath))

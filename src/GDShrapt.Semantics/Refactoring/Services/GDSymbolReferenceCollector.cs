@@ -379,6 +379,12 @@ public class GDSymbolReferenceCollector
             CollectSignalConnectionReferences(symbol.Name, declaringScript, refs, seen);
         }
 
+        // Step 3b: .tscn [connection signal="X"] lines for a signal symbol
+        if (_projectModel != null && isClassMember && symbol.Kind == GDSymbolKind.Signal)
+        {
+            CollectSceneSignalNameReferences(symbol.Name, declaringScript, refs, seen);
+        }
+
         // Step 4: Contract string references (has_method, emit_signal, call, etc.)
         if (_projectModel != null && isClassMember)
         {
@@ -746,6 +752,64 @@ public class GDSymbolReferenceCollector
                 callerTypeName: conn.CallbackClassName ?? script.TypeName,
                 signalName: conn.SignalName,
                 isSceneSignal: conn.IsSceneConnection));
+        }
+    }
+
+    /// <summary>
+    /// Scene connections whose <c>signal="X"</c> names this signal. Strict when the emitter node's type
+    /// (sub-scene instances resolved) is in the declaring type's hierarchy, Potential when unknown,
+    /// skipped when unrelated.
+    /// </summary>
+    private void CollectSceneSignalNameReferences(
+        string signalName,
+        GDScriptFile? declaringScript,
+        List<GDSymbolReference> refs,
+        HashSet<(string?, int, int)> seen)
+    {
+        var provider = _project.SceneTypesProvider;
+        if (provider == null || _projectModel == null)
+            return;
+
+        var declaringType = declaringScript?.TypeName;
+        foreach (var scene in provider.AllScenes)
+        {
+            if (string.IsNullOrEmpty(scene.FullPath))
+                continue;
+
+            foreach (var conn in scene.SignalConnections)
+            {
+                if (conn.SignalName != signalName)
+                    continue;
+
+                var fromNode = scene.Nodes.FirstOrDefault(n => n.Path == conn.FromNode);
+                var emitterType = _projectModel.ResolveSceneNodeTypeName(scene, fromNode);
+
+                GDReferenceConfidence confidence;
+                if (string.IsNullOrEmpty(declaringType))
+                    confidence = GDReferenceConfidence.Strict;
+                else if (string.IsNullOrEmpty(emitterType))
+                    confidence = GDReferenceConfidence.Potential;
+                else if (_projectModel.TypeSystem.IsAssignableTo(emitterType, declaringType)
+                      || _projectModel.TypeSystem.IsAssignableTo(declaringType, emitterType))
+                    confidence = GDReferenceConfidence.Strict;
+                else
+                    continue;
+
+                var line = conn.LineNumber - 1;   // scene lines are 1-based
+                if (!seen.Add((scene.FullPath, line, conn.SignalColumn)))
+                    continue;
+
+                var script = new GDScriptFile(new GDScriptReference(scene.FullPath));
+                refs.Add(new GDSymbolReference(
+                    script, null, null,
+                    line, conn.SignalColumn,
+                    confidence,
+                    null,
+                    GDSymbolReferenceKind.SceneSignalConnection,
+                    callerTypeName: emitterType,
+                    signalName: signalName,
+                    isSceneSignal: true));
+            }
         }
     }
 

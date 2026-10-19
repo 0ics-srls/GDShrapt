@@ -113,6 +113,13 @@ own class says nothing about the receiver's type (`coin.gd extends Area2D` calli
 references/rename include casts. A member access on `(x as T)` has receiver `T`, and a `T|null` receiver
 (e.g. `var q := x as T`) is treated as `T` — in `GDSemanticReferenceCollector` and in the cross-file finder.
 
+**Scene connections (0ics D4b/D4c).** `.tscn` `[connection signal="X" from=... to=... method="Y"]` lines are
+references for both roles: the callback method (existing `SignalConnectionRegistry` step) and the signal
+(`GDSymbolReferenceCollector.CollectSceneSignalNameReferences`, at `GDSignalConnectionInfo.SignalColumn`). Node
+types come from one resolver, `GDProjectSemanticModel.ResolveSceneNodeTypeName(scene, node)`, which types an
+instanced sub-scene node by its root script. `GDRenameService.CollectTscnEdits` edits `method="..."` (typed by the
+TO node) and `signal="..."` (typed by the FROM node); Strict when compatible, Potential when the type is unknown.
+
 ### GDCrossFileReferenceFinder
 
 Finds references across project files.

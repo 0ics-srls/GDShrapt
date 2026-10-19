@@ -1212,6 +1212,10 @@ public class GDRenameService
         };
     }
 
+    /// <summary>
+    /// Edits .tscn [connection] attributes for both roles: <c>method="old"</c> (callback, typed by the TO node)
+    /// and <c>signal="old"</c> (typed by the FROM node). Node types resolve instanced sub-scenes.
+    /// </summary>
     private void CollectTscnEdits(
         string oldName,
         string newName,
@@ -1231,56 +1235,61 @@ public class GDRenameService
 
             foreach (var conn in scene.SignalConnections)
             {
-                if (conn.Method != oldName)
-                    continue;
-
-                var column = FindMethodColumnInTscn(scene.FullPath, conn.LineNumber, oldName);
-
-                if (string.IsNullOrEmpty(declaringTypeName))
+                if (conn.Method == oldName)
                 {
-                    // No declaring type — all connections are strict
-                    strictEdits.Add(new GDTextEdit(
-                        scene.FullPath,
-                        conn.LineNumber,
-                        column,
-                        oldName,
-                        newName,
-                        GDReferenceConfidence.Strict,
-                        $".tscn signal connection method=\"{oldName}\""));
-                    filesModified.Add(scene.FullPath);
-                    continue;
+                    var column = FindMethodColumnInTscn(scene.FullPath, conn.LineNumber, oldName);
+                    AddTscnEdit(scene, conn.ToNode, conn.LineNumber, column, "method",
+                        oldName, newName, declaringTypeName, strictEdits, potentialEdits, filesModified);
                 }
 
-                // Resolve target node type for type-filtered mode
-                var targetNode = scene.Nodes.FirstOrDefault(n =>
-                    n.Path == conn.ToNode || (conn.ToNode == "." && n.Path == "."));
-                var targetType = targetNode?.ScriptTypeName ?? targetNode?.NodeType;
-
-                if (!string.IsNullOrEmpty(targetType) && IsTypeCompatible(targetType!, declaringTypeName))
+                if (conn.SignalName == oldName)
                 {
-                    strictEdits.Add(new GDTextEdit(
-                        scene.FullPath,
-                        conn.LineNumber,
-                        column,
-                        oldName,
-                        newName,
-                        GDReferenceConfidence.Strict,
-                        $".tscn signal connection method=\"{oldName}\" (target: {targetType})"));
-                    filesModified.Add(scene.FullPath);
-                }
-                else if (string.IsNullOrEmpty(targetType) && potentialEdits != null)
-                {
-                    potentialEdits.Add(new GDTextEdit(
-                        scene.FullPath,
-                        conn.LineNumber,
-                        column,
-                        oldName,
-                        newName,
-                        GDReferenceConfidence.Potential,
-                        $".tscn signal connection method=\"{oldName}\" (target type unknown)"));
-                    filesModified.Add(scene.FullPath);
+                    // GDTextEdit columns are 1-based; SignalColumn is 0-based.
+                    AddTscnEdit(scene, conn.FromNode, conn.LineNumber, conn.SignalColumn + 1, "signal",
+                        oldName, newName, declaringTypeName, strictEdits, potentialEdits, filesModified);
                 }
             }
+        }
+    }
+
+    private void AddTscnEdit(
+        GDSceneInfo scene,
+        string nodePath,
+        int line,
+        int column,
+        string attribute,
+        string oldName,
+        string newName,
+        string? declaringTypeName,
+        List<GDTextEdit> strictEdits,
+        List<GDTextEdit>? potentialEdits,
+        HashSet<string> filesModified)
+    {
+        if (string.IsNullOrEmpty(declaringTypeName))
+        {
+            // No declaring type — all connections are strict
+            strictEdits.Add(new GDTextEdit(scene.FullPath, line, column, oldName, newName,
+                GDReferenceConfidence.Strict, $".tscn signal connection {attribute}=\"{oldName}\""));
+            filesModified.Add(scene.FullPath);
+            return;
+        }
+
+        var node = scene.Nodes.FirstOrDefault(n => n.Path == nodePath || (nodePath == "." && n.Path == "."));
+        var nodeType = node == null
+            ? null
+            : _projectModel?.ResolveSceneNodeTypeName(scene, node) ?? node.ScriptTypeName ?? node.NodeType;
+
+        if (!string.IsNullOrEmpty(nodeType) && IsTypeCompatible(nodeType!, declaringTypeName))
+        {
+            strictEdits.Add(new GDTextEdit(scene.FullPath, line, column, oldName, newName,
+                GDReferenceConfidence.Strict, $".tscn signal connection {attribute}=\"{oldName}\" (node: {nodeType})"));
+            filesModified.Add(scene.FullPath);
+        }
+        else if (string.IsNullOrEmpty(nodeType) && potentialEdits != null)
+        {
+            potentialEdits.Add(new GDTextEdit(scene.FullPath, line, column, oldName, newName,
+                GDReferenceConfidence.Potential, $".tscn signal connection {attribute}=\"{oldName}\" (node type unknown)"));
+            filesModified.Add(scene.FullPath);
         }
     }
 

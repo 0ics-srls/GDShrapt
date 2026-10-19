@@ -645,6 +645,7 @@ public class GDSceneTypesProvider : IGDRuntimeProvider, IDisposable
             var methodGroup = match.Groups[4];
             var lineStart = content.LastIndexOf('\n', match.Index) + 1;
             var methodColumn = methodGroup.Index - lineStart;
+            var signalColumn = match.Groups[1].Index - lineStart;
 
             // Resolve source node type
             string? sourceNodeType = null;
@@ -666,6 +667,7 @@ public class GDSceneTypesProvider : IGDRuntimeProvider, IDisposable
                 Method = match.Groups[4].Value,
                 LineNumber = lineNumber,
                 MethodColumn = methodColumn,
+                SignalColumn = signalColumn,
                 SourceNodeType = sourceNodeType
             });
         }
@@ -1507,6 +1509,11 @@ public class GDSignalConnectionInfo
     /// Column (0-based) of the method name inside the line.
     /// </summary>
     public int MethodColumn { get; set; }
+
+    /// <summary>
+    /// 0-based column of the signal name value inside <c>signal="..."</c> on <see cref="LineNumber"/>.
+    /// </summary>
+    public int SignalColumn { get; set; }
 
     /// <summary>
     /// Type of the node emitting the signal (resolved from scene nodes).

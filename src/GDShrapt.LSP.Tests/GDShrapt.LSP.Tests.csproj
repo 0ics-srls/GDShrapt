@@ -31,6 +31,7 @@
 
   <ItemGroup>
     <Compile Include="..\GDShrapt.Semantics.Tests\Helpers\GDTempProject.cs" Link="Helpers\GDTempProject.cs" />
+    <Compile Include="..\GDShrapt.Semantics.Tests\Helpers\GDSceneSignalFixture.cs" Link="Helpers\GDSceneSignalFixture.cs" />
   </ItemGroup>
 
 </Project>
