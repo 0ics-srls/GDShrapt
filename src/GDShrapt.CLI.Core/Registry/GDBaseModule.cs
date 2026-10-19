@@ -26,7 +26,7 @@ public sealed class GDBaseModule : IGDModule
         // GDProjectSemanticModel uses Lazy<T> — safe to construct before analysis.
         // Handlers will return null/empty until SemanticModel is populated.
         var projectModel = _deferAnalysis
-            ? new GDProjectSemanticModel(project)
+            ? new GDProjectSemanticModel(project, subscribeToChanges: true)
             : project.AnalyzeAndBuildProjectModel();
         registry.Register<GDProjectSemanticModel>(projectModel);
 

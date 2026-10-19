@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.IO;
 using GDShrapt.Semantics;
 
 namespace GDShrapt.LSP;
@@ -47,7 +48,26 @@ public class GDDocumentManager
         {
             script.Reload(content);
             InvalidateSemanticModel(script);
+            return;
         }
+
+        // A .gd file the project does not know yet (created after startup, missed by the watcher):
+        // the client delivers it through didOpen, so add it here.
+        if (filePath.EndsWith(".gd", StringComparison.OrdinalIgnoreCase) && IsUnderProject(filePath))
+        {
+            var added = _project.AddScript(filePath, content);
+            _projectModel?.AttachScript(added);
+            _projectModel?.InvalidateFile(filePath);
+        }
+    }
+
+    private bool IsUnderProject(string filePath)
+    {
+        var comparison = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        var root = Path.GetFullPath(_project.ProjectPath).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        return Path.GetFullPath(filePath).StartsWith(root, comparison);
     }
 
     /// <summary>

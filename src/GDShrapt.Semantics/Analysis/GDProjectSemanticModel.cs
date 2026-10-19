@@ -210,6 +210,30 @@ public class GDProjectSemanticModel : IDisposable
 
         foreach (var file in _project.ScriptFiles)
             AttachScript(file);
+
+        // Scripts created later by the project's file watcher get the lazy factory too.
+        _project.ScriptCreated += OnScriptCreated;
+
+        // .tscn edits seen by the scene watcher refresh the scene connections used by references.
+        if (_subscribeToChanges && _project.SceneTypesProvider != null)
+            _project.SceneTypesProvider.SceneChanged += OnSceneChanged;
+    }
+
+    private void OnScriptCreated(object? sender, GDScriptFileEventArgs e)
+    {
+        if (e.Script != null)
+            AttachScript(e.Script);
+    }
+
+    private void OnSceneChanged(object? sender, GDSceneChangedEventArgs e)
+    {
+        if (!_signalRegistry.IsValueCreated)
+            return;   // built lazily later from the current scenes anyway
+
+        var registry = _signalRegistry.Value;
+        registry.UnregisterFile(e.FullPath);
+        if (e.SceneInfo != null)
+            RegisterSceneConnections(registry, e.SceneInfo);
     }
 
     // ========================================
@@ -288,25 +312,31 @@ public class GDProjectSemanticModel : IDisposable
         if (sceneProvider != null)
         {
             foreach (var sceneInfo in sceneProvider.AllScenes)
-            {
-                foreach (var conn in sceneInfo.SignalConnections)
-                {
-                    var fromNode = sceneInfo.Nodes.FirstOrDefault(n => n.Path == conn.FromNode);
-                    var toNode = sceneInfo.Nodes.FirstOrDefault(n => n.Path == conn.ToNode);
-
-                    registry.Register(GDSignalConnectionEntry.FromScene(
-                        sceneInfo.FullPath,
-                        conn.LineNumber,
-                        conn.MethodColumn,
-                        ResolveSceneNodeTypeName(fromNode) ?? conn.SourceNodeType ?? "",
-                        conn.SignalName,
-                        ResolveSceneNodeTypeName(toNode) ?? "",
-                        conn.Method));
-                }
-            }
+                RegisterSceneConnections(registry, sceneInfo);
         }
 
         return registry;
+    }
+
+    /// <summary>
+    /// Registers the [connection] entries of one scene.
+    /// </summary>
+    private void RegisterSceneConnections(GDSignalConnectionRegistry registry, GDSceneInfo sceneInfo)
+    {
+        foreach (var conn in sceneInfo.SignalConnections)
+        {
+            var fromNode = sceneInfo.Nodes.FirstOrDefault(n => n.Path == conn.FromNode);
+            var toNode = sceneInfo.Nodes.FirstOrDefault(n => n.Path == conn.ToNode);
+
+            registry.Register(GDSignalConnectionEntry.FromScene(
+                sceneInfo.FullPath,
+                conn.LineNumber,
+                conn.MethodColumn,
+                ResolveSceneNodeTypeName(fromNode) ?? conn.SourceNodeType ?? "",
+                conn.SignalName,
+                ResolveSceneNodeTypeName(toNode) ?? "",
+                conn.Method));
+        }
     }
 
     private string? ResolveSceneNodeTypeName(GDNodeTypeInfo? node)
@@ -1593,6 +1623,9 @@ public class GDProjectSemanticModel : IDisposable
             {
                 if (_subscribeToChanges)
                     _project.IncrementalChange -= OnIncrementalChange;
+                _project.ScriptCreated -= OnScriptCreated;
+                if (_subscribeToChanges && _project.SceneTypesProvider != null)
+                    _project.SceneTypesProvider.SceneChanged -= OnSceneChanged;
 
                 Func<GDScriptFile, GDSemanticModel?> factory = BuildModelFor;
                 foreach (var file in _project.ScriptFiles)

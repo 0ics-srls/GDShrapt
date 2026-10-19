@@ -75,6 +75,16 @@ int lspCharacter = cliColumn - 1;
   response never runs on the reader loop, so the reader keeps dispatching while it works.
 - `Completion` completes when the read loop ends (end of input or stop).
 
+## Disk Changes
+
+- No `workspace/didChangeWatchedFiles` handler: clients such as LSAI deliver created/modified scripts as
+  `didOpen` / full-text `didChange`; deletes, never-opened edits and `.tscn` changes come from the server's own
+  watchers (`EnableFileWatcher`, `SceneTypesProvider.EnableFileWatcher()`).
+- `GDBaseModule` (deferred/LSP mode) builds the project model with `subscribeToChanges: true`, so watcher events
+  invalidate cached models; scripts created by the watcher get the lazy model factory (`ScriptCreated`).
+- `didOpen` of a `.gd` under the project root that the project does not know yet adds it (`AddScript`).
+- Scene `SceneChanged` refreshes that scene's entries in `SignalConnectionRegistry` (scene references).
+
 ## Important Notes
 
 - **LSP = Strict mode only** — Pro module is NOT loaded in LSP (by design)
