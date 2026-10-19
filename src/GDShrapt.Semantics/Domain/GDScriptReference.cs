@@ -64,9 +64,20 @@ public class GDScriptReference : IEquatable<GDScriptReference>
     /// </summary>
     public string FileNameWithoutExtension => System.IO.Path.GetFileNameWithoutExtension(_fullPath);
 
+    /// <summary>
+    /// Path comparison of the host file system: case-insensitive on Windows/macOS, case-sensitive elsewhere
+    /// (on Linux <c>Player.gd</c> and <c>player.gd</c> are two files).
+    /// </summary>
+    public static StringComparison PathComparison { get; } =
+        OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+
+    /// <summary>String comparer matching <see cref="PathComparison"/>.</summary>
+    public static StringComparer PathComparer { get; } =
+        OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+
     public override int GetHashCode()
     {
-        return _fullPath?.GetHashCode(StringComparison.OrdinalIgnoreCase) ?? 0;
+        return _fullPath == null ? 0 : PathComparer.GetHashCode(_fullPath);
     }
 
     public override bool Equals(object? obj)
@@ -79,7 +90,7 @@ public class GDScriptReference : IEquatable<GDScriptReference>
         if (other is null)
             return false;
 
-        return string.Equals(_fullPath, other._fullPath, StringComparison.OrdinalIgnoreCase);
+        return string.Equals(_fullPath, other._fullPath, PathComparison);
     }
 
     public override string ToString()

@@ -381,6 +381,27 @@ public class GDScriptProject : IGDScriptProvider, IDisposable
     /// Enriches semantic models with cross-method call-site analysis.
     /// Must be called after AnalyzeAll() and before parameter type inference.
     /// </summary>
+    /// <summary>
+    /// Type name → script, for applying inference reports. Type names shared by several scripts (scripts without
+    /// class_name are named after their file, e.g. a/util.gd and b/util.gd) are left out instead of letting the
+    /// last one win, so no script receives another script's report.
+    /// </summary>
+    internal Dictionary<string, GDScriptFile> BuildUnambiguousFilesByType()
+    {
+        var filesByType = new Dictionary<string, GDScriptFile>(GDScriptReference.PathComparer);
+        var ambiguous = new HashSet<string>(GDScriptReference.PathComparer);
+        foreach (var file in ScriptFiles)
+        {
+            if (string.IsNullOrEmpty(file.TypeName) || ambiguous.Contains(file.TypeName))
+                continue;
+            if (filesByType.Remove(file.TypeName))
+                ambiguous.Add(file.TypeName);
+            else
+                filesByType[file.TypeName] = file;
+        }
+        return filesByType;
+    }
+
     public void EnrichWithCallSiteAnalysis()
     {
         var engine = new GDMethodSignatureInferenceEngine(this);
@@ -388,12 +409,7 @@ public class GDScriptProject : IGDScriptProvider, IDisposable
 
         var projectReport = engine.GetProjectReport();
 
-        var filesByType = new Dictionary<string, GDScriptFile>(StringComparer.OrdinalIgnoreCase);
-        foreach (var file in ScriptFiles)
-        {
-            if (!string.IsNullOrEmpty(file.TypeName))
-                filesByType[file.TypeName] = file;
-        }
+        var filesByType = BuildUnambiguousFilesByType();
 
         foreach (var (methodKey, report) in projectReport.Methods)
         {

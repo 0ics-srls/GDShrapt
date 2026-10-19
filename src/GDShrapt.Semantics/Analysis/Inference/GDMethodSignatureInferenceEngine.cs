@@ -58,13 +58,8 @@ internal class GDMethodSignatureInferenceEngine
 
         _callSiteCollector.Reset();
 
-        // Lookup for progressive injection
-        var filesByType = new Dictionary<string, GDScriptFile>(StringComparer.OrdinalIgnoreCase);
-        foreach (var file in _project.ScriptFiles)
-        {
-            if (!string.IsNullOrEmpty(file.TypeName))
-                filesByType[file.TypeName] = file;
-        }
+        // Lookup for progressive injection (ambiguous type names are left out, see BuildUnambiguousFilesByType)
+        var filesByType = _project.BuildUnambiguousFilesByType();
 
         _cycleDetector.BuildDependencyGraph();
         _cycleDetector.DetectCycles();

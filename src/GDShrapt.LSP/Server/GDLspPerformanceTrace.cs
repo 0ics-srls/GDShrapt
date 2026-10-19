@@ -1,35 +1,36 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Threading;
 
 namespace GDShrapt.LSP;
 
 /// <summary>
-/// File-based performance trace for diagnosing LSP hangs.
-/// Writes timestamped entries to %TEMP%/gdshrapt-lsp-trace.log.
+/// Opt-in file-based performance trace for diagnosing LSP hangs.
+/// Writes only when a path is configured: env <c>GDSHRAPT_LSP_TRACE</c> (read once at startup) or
+/// <see cref="Configure"/>. No default file, existing content is never truncated.
 /// </summary>
 internal static class GDLspPerformanceTrace
 {
-    private static readonly string _logPath;
+    private static string? _logPath = Environment.GetEnvironmentVariable("GDSHRAPT_LSP_TRACE");
     private static readonly object _lock = new();
     private static readonly Stopwatch _uptime = Stopwatch.StartNew();
 
-    static GDLspPerformanceTrace()
-    {
-        _logPath = Path.Combine(Path.GetTempPath(), "gdshrapt-lsp-trace.log");
-        // Clear old log on startup
-        try { File.WriteAllText(_logPath, $"=== GDShrapt LSP Trace started at {DateTime.Now:yyyy-MM-dd HH:mm:ss} ===\n"); }
-        catch { /* best effort */ }
-    }
+    /// <summary>Sets (or clears with null) the trace file.</summary>
+    internal static void Configure(string? path) => Volatile.Write(ref _logPath, string.IsNullOrEmpty(path) ? null : path);
 
-    public static string LogPath => _logPath;
+    public static string? LogPath => Volatile.Read(ref _logPath);
 
     public static void Log(string tag, string message)
     {
+        var path = Volatile.Read(ref _logPath);
+        if (path == null)
+            return;
+
         var line = $"[{_uptime.Elapsed:mm\\:ss\\.fff}] [{tag}] {message}";
         lock (_lock)
         {
-            try { File.AppendAllText(_logPath, line + "\n"); }
+            try { File.AppendAllText(path, line + "\n"); }
             catch { /* best effort */ }
         }
     }

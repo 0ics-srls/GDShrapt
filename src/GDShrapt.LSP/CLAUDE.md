@@ -85,6 +85,14 @@ int lspCharacter = cliColumn - 1;
 - `didOpen` of a `.gd` under the project root that the project does not know yet adds it (`AddScript`).
 - Scene `SceneChanged` refreshes that scene's entries in `SignalConnectionRegistry` (scene references).
 
+## Diagnostics Trace & Paths
+
+- `GDLspPerformanceTrace` is opt-in: set env `GDSHRAPT_LSP_TRACE=<file>` (appended, never truncated). No default
+  file in `$TMPDIR`.
+- Script paths compare like the host file system (`GDScriptReference.PathComparison`: case-sensitive on Linux,
+  case-insensitive on Windows/macOS). Scripts without `class_name` sharing a file name are never cross-assigned
+  inference reports (`GDScriptProject.BuildUnambiguousFilesByType`).
+
 ## Important Notes
 
 - **LSP = Strict mode only** — Pro module is NOT loaded in LSP (by design)
