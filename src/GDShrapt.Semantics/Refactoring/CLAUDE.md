@@ -104,6 +104,15 @@ the bridge-merge path when connected — so renaming covers every shared-type de
 call is promoted to a strict edit (fully-covered). The call-site param union is treated as a real union
 (promotable); a receiver with no provable union (no call sites) stays Potential.
 
+**Unrelated hierarchies (0ics D4a).** `BuildUnrelatedFilesSet` marks as unrelated only files that DECLARE a
+same-named member in an unrelated hierarchy. Files that only REFERENCE the name are never marked: the caller's
+own class says nothing about the receiver's type (`coin.gd extends Area2D` calling `p.try_jump()` on a typed
+`Player` is a strict reference); each reference's confidence already reflects the receiver type.
+
+**Casts.** `x as T` is a type usage (`GDTypeUsageKind.Cast`, next to `TypeCheck` for `is`), so class
+references/rename include casts. A member access on `(x as T)` has receiver `T`, and a `T|null` receiver
+(e.g. `var q := x as T`) is treated as `T` — in `GDSemanticReferenceCollector` and in the cross-file finder.
+
 ### GDCrossFileReferenceFinder
 
 Finds references across project files.

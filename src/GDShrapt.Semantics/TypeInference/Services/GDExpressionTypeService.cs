@@ -182,6 +182,10 @@ internal class GDExpressionTypeService : IGDExpressionTypeProvider
         if (expression == null)
             return null;
 
+        // Parenthesized expression: same type as its content, e.g. `(body as Player).jump()`.
+        if (expression is GDBracketExpression bracketExpr)
+            return GetExpressionType(bracketExpr.InnerExpression);
+
         // For identifier expressions, flow analysis takes priority over cache
         if (expression is GDIdentifierExpression identExpr)
         {

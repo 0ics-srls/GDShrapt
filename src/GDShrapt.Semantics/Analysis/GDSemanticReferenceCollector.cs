@@ -730,7 +730,7 @@ internal class GDSemanticReferenceCollector : GDVisitor
 
         var opType = dualOperator.Operator?.OperatorType;
 
-        if (opType == GDDualOperatorType.Is)
+        if (opType == GDDualOperatorType.Is || opType == GDDualOperatorType.As)
         {
             var rightExpr = dualOperator.RightExpression;
             if (rightExpr != null)
@@ -738,7 +738,8 @@ internal class GDSemanticReferenceCollector : GDVisitor
                 var typeName = rightExpr.ToString();
                 if (!string.IsNullOrEmpty(typeName) && !IsBuiltInType(typeName))
                 {
-                    _model!.AddTypeUsage(typeName, dualOperator, GDTypeUsageKind.TypeCheck);
+                    _model!.AddTypeUsage(typeName, dualOperator,
+                        opType == GDDualOperatorType.As ? GDTypeUsageKind.Cast : GDTypeUsageKind.TypeCheck);
                 }
             }
         }
@@ -836,7 +837,11 @@ internal class GDSemanticReferenceCollector : GDVisitor
             return;
         }
 
-        var callerSemanticType = _typeEngine?.InferSemanticType(callerExpr);
+        // `(x as T).member`: the receiver is the cast target T, whatever x is.
+        var castTarget = GetCastTargetTypeName(callerExpr);
+        var callerSemanticType = castTarget != null
+            ? GDSemanticType.FromRuntimeTypeName(castTarget)
+            : StripNullFromUnion(_typeEngine?.InferSemanticType(callerExpr));
         var callerType = callerSemanticType?.IsSignal == true
             ? "Signal"
             : NormalizeTypeName(callerSemanticType?.DisplayName);
@@ -869,7 +874,8 @@ internal class GDSemanticReferenceCollector : GDVisitor
             if (!string.IsNullOrEmpty(varName))
             {
                 var flowVarType = _model?.GetVariableTypeAt(varName, memberExpression);
-                var narrowedType = flowVarType?.EffectiveType?.DisplayName;
+                // `var q := x as T` gives q the type `T|null`; a member access on q targets T.
+                var narrowedType = StripNullFromUnion(flowVarType?.EffectiveType)?.DisplayName;
                 if (!string.IsNullOrEmpty(narrowedType) && !GDSemanticType.FromRuntimeTypeName(narrowedType).IsVariant)
                 {
                     var symbolInfo = ResolveMemberOnType(narrowedType, memberName);
@@ -911,6 +917,35 @@ internal class GDSemanticReferenceCollector : GDVisitor
             _inAssignmentLeft = false;
             _inPropertyWriteCaller = _isSimpleAssignment;
         }
+    }
+
+    /// <summary>
+    /// For <c>x as T</c> (optionally parenthesized) returns <c>T</c>; otherwise null.
+    /// </summary>
+    private static string? GetCastTargetTypeName(GDExpression? expression)
+    {
+        while (expression is GDBracketExpression bracket)
+            expression = bracket.InnerExpression;
+        if (expression is GDDualOperatorExpression dual && dual.Operator?.OperatorType == GDDualOperatorType.As)
+        {
+            var target = dual.RightExpression?.ToString()?.Trim();
+            return string.IsNullOrEmpty(target) ? null : target;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// <c>T|null</c> → <c>T</c> (a member access on a null receiver would fail at runtime); other types unchanged.
+    /// </summary>
+    private static GDSemanticType? StripNullFromUnion(GDSemanticType? type)
+    {
+        if (type is GDUnionSemanticType union)
+        {
+            var nonNull = union.Types.Where(t => t is not GDNullSemanticType).ToList();
+            if (nonNull.Count == 1 && nonNull.Count < union.Types.Count)
+                return nonNull[0];
+        }
+        return type;
     }
 
     public override void Left(GDDualOperatorExpression dualOperator)

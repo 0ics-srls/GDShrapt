@@ -855,36 +855,9 @@ public class GDRenameService
                 unrelated.Add(otherScript.FullPath);
         }
 
-        // Also mark files that only have references (no declaration) but belong to unrelated hierarchies.
-        // Files with references but no declaration: their script type should be in the declaring type's hierarchy.
-        var filesWithDecl = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        filesWithDecl.Add(declaringScript.FullPath);
-        foreach (var sref in collectedRefs.References)
-        {
-            if (sref.FilePath != null && sref.Kind == GDSymbolReferenceKind.Declaration)
-                filesWithDecl.Add(sref.FilePath);
-        }
-
-        // For files that have references but no declaration, check if they're related
-        var refOnlyFiles = collectedRefs.References
-            .Where(r => r.FilePath != null && !filesWithDecl.Contains(r.FilePath))
-            .Select(r => r.Script)
-            .Distinct()
-            .ToList();
-
-        foreach (var refScript in refOnlyFiles)
-        {
-            if (refScript.FullPath == null) continue;
-            var refType = refScript.TypeName;
-            if (string.IsNullOrEmpty(refType) || typeSystem == null) continue;
-
-            var inSameHierarchy =
-                typeSystem.IsAssignableTo(refType, declaringTypeName!) ||
-                typeSystem.IsAssignableTo(declaringTypeName!, refType);
-
-            if (!inSameHierarchy)
-                unrelated.Add(refScript.FullPath);
-        }
+        // Files that only REFERENCE the name are never marked unrelated here: the caller's own class says
+        // nothing about the receiver's type (coin.gd extends Area2D may call p.try_jump() on a typed Player).
+        // Each reference's confidence (Strict vs Potential) already reflects the receiver type.
 
         return unrelated;
     }

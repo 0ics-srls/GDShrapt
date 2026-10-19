@@ -24,7 +24,12 @@ public enum GDTypeUsageKind
     /// <summary>
     /// Extends declaration (extends ClassName).
     /// </summary>
-    Extends
+    Extends,
+
+    /// <summary>
+    /// Type cast (obj as ClassName).
+    /// </summary>
+    Cast
 }
 
 /// <summary>

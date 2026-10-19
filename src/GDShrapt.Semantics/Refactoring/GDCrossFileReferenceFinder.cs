@@ -145,6 +145,13 @@ public class GDCrossFileReferenceFinder
                 if (confidence == GDReferenceConfidence.Strict)
                 {
                     var callerSemType = semanticModel.GetExpressionType(memberAccess.CallerExpression);
+                    // `x as T` yields `T|null`: a member access on it targets T.
+                    if (callerSemType is GDUnionSemanticType nullableUnion)
+                    {
+                        var nonNull = nullableUnion.Types.Where(t => t is not GDNullSemanticType).ToList();
+                        if (nonNull.Count == 1 && nonNull.Count < nullableUnion.Types.Count)
+                            callerSemType = nonNull[0];
+                    }
                     var callerType = callerSemType?.DisplayName;
                     if (!string.IsNullOrEmpty(callerType)
                         && callerType != GDWellKnownTypes.Self
