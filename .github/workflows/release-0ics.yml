@@ -1,0 +1,53 @@
+# The ONLY workflow of the 0ics fork. Normal pushes (main-0ics) and pull requests run no CI.
+# Release = git push origin main-0ics:release-0ics  (or manual dispatch). Version number: 0ics/VERSION.
+name: release-0ics
+on:
+  push:
+    branches: [release-0ics]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Version
+        id: v
+        run: |
+          N=$(tr -d '[:space:]' < 0ics/VERSION)
+          echo "n=$N" >> "$GITHUB_OUTPUT"
+          echo "ver=6.0.0-alpha.7.$N" >> "$GITHUB_OUTPUT"
+          echo "tag=lsai-gdshrapt-v6.0.0-alpha.7.$N" >> "$GITHUB_OUTPUT"
+      - name: Refuse an existing release (no silent overwrite)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${{ steps.v.outputs.tag }}" >/dev/null 2>&1; then
+            echo "Release ${{ steps.v.outputs.tag }} already exists: bump 0ics/VERSION"; exit 1
+          fi
+      - name: Build
+        run: dotnet build src/GDShrapt.sln -c Release
+      - name: Test
+        run: >
+          dotnet test src/GDShrapt.sln -c Release --no-build
+          --filter "TestCategory!=StressTests&TestCategory!=LongRunning&TestCategory!=ManualVerification&TestCategory!=SmokeTests&TestCategory!=Performance&TestCategory!=Memory"
+      - name: Publish
+        run: |
+          dotnet publish src/GDShrapt.LSP -c Release -o out --no-self-contained -p:VersionSuffix=alpha.7.${{ steps.v.outputs.n }}
+          echo "${{ steps.v.outputs.ver }}" > out/VERSION
+          (cd out && zip -qr "../gdshrapt-lsp-${{ steps.v.outputs.ver }}.zip" .)
+          sha256sum "gdshrapt-lsp-${{ steps.v.outputs.ver }}.zip" > "gdshrapt-lsp-${{ steps.v.outputs.ver }}.zip.sha256"
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "${{ steps.v.outputs.tag }}"
+          "gdshrapt-lsp-${{ steps.v.outputs.ver }}.zip" "gdshrapt-lsp-${{ steps.v.outputs.ver }}.zip.sha256"
+          --target "${{ github.sha }}" --title "GDShrapt LSP (0ics) ${{ steps.v.outputs.ver }}"
+          --notes "Fork build for LSAI (framework-dependent net10, run with: dotnet GDShrapt.LSP.dll --stdio). See 0ics/README.md."
