@@ -11,13 +11,19 @@ namespace GDShrapt.LSP;
 
 /// <summary>
 /// JSON-RPC transport over stdio (stdin/stdout).
-/// Uses Content-Length header as per LSP specification.
+/// Uses Content-Length header as per LSP specification. The Stream constructor (used by the server)
+/// frames in bytes: Content-Length counts UTF-8 bytes. The TextReader constructor is kept for legacy tests.
 /// </summary>
 public class GDStdioJsonRpcTransport : IGDJsonRpcTransport
 {
     private readonly IGDMessageSerializer _serializer;
-    private readonly TextReader _input;
-    private readonly TextWriter _output;
+    private readonly TextReader? _input;
+    private readonly TextWriter? _output;
+    private readonly Stream? _inStream;
+    private readonly Stream? _outStream;
+    private readonly byte[] _buf = new byte[64 * 1024];
+    private int _bufStart;
+    private int _bufEnd;
     private readonly ConcurrentDictionary<string, RequestHandler> _requestHandlers = new();
     private readonly ConcurrentDictionary<string, NotificationHandler> _notificationHandlers = new();
     private readonly ConcurrentDictionary<object, TaskCompletionSource<JsonElement?>> _pendingRequests = new();
@@ -34,8 +40,18 @@ public class GDStdioJsonRpcTransport : IGDJsonRpcTransport
     public GDLspLogger? Logger { get; set; }
 
     public GDStdioJsonRpcTransport(IGDMessageSerializer serializer)
-        : this(serializer, Console.In, Console.Out)
+        : this(serializer, Console.OpenStandardInput(), Console.OpenStandardOutput())
     {
+    }
+
+    /// <summary>
+    /// Byte-exact transport: headers are ASCII, the body is exactly Content-Length UTF-8 bytes.
+    /// </summary>
+    public GDStdioJsonRpcTransport(IGDMessageSerializer serializer, Stream input, Stream output)
+    {
+        _serializer = serializer;
+        _inStream = input;
+        _outStream = output;
     }
 
     public GDStdioJsonRpcTransport(IGDMessageSerializer serializer, TextReader input, TextWriter output)
@@ -44,6 +60,11 @@ public class GDStdioJsonRpcTransport : IGDJsonRpcTransport
         _input = input;
         _output = output;
     }
+
+    /// <summary>
+    /// Completes when the read loop ends (end of input or stop).
+    /// </summary>
+    public Task Completion => _readTask ?? Task.CompletedTask;
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
@@ -71,7 +92,9 @@ public class GDStdioJsonRpcTransport : IGDJsonRpcTransport
     public async Task<TResult?> SendRequestAsync<TParams, TResult>(string method, TParams parameters, CancellationToken cancellationToken)
     {
         var id = Interlocked.Increment(ref _requestId).ToString();
-        var tcs = new TaskCompletionSource<JsonElement?>();
+        // Continuations must not run inline on the reader loop (a handler resumed by a client response
+        // would otherwise block reading of every following message).
+        var tcs = new TaskCompletionSource<JsonElement?>(TaskCreationOptions.RunContinuationsAsynchronously);
         _pendingRequests[id] = tcs;
 
         try
@@ -170,9 +193,13 @@ public class GDStdioJsonRpcTransport : IGDJsonRpcTransport
         {
             try
             {
-                var message = await ReadMessageAsync(cancellationToken).ConfigureAwait(false);
+                var message = _inStream != null
+                    ? await ReadMessageBytesAsync(cancellationToken).ConfigureAwait(false)
+                    : await ReadMessageAsync(cancellationToken).ConfigureAwait(false);
                 if (message == null)
                     break;
+                if (message.Length == 0)
+                    continue;   // header block without a valid Content-Length: skipped
 
                 _ = ProcessMessageAsync(message, cancellationToken);
             }
@@ -187,13 +214,93 @@ public class GDStdioJsonRpcTransport : IGDJsonRpcTransport
         }
     }
 
+    /// <summary>
+    /// Reads one message from the byte stream. Returns null on end of input and an empty string
+    /// for a header block without a valid Content-Length.
+    /// </summary>
+    private async Task<string?> ReadMessageBytesAsync(CancellationToken cancellationToken)
+    {
+        int contentLength = -1;
+        while (true)
+        {
+            var line = await ReadHeaderLineAsync(cancellationToken).ConfigureAwait(false);
+            if (line == null)
+                return null;
+            if (line.Length == 0)
+                break;
+
+            var colon = line.IndexOf(':');
+            if (colon > 0
+                && line.Substring(0, colon).Trim().Equals("Content-Length", StringComparison.OrdinalIgnoreCase)
+                && int.TryParse(line.Substring(colon + 1).Trim(), out var n)
+                && n >= 0)
+            {
+                contentLength = n;
+            }
+        }
+
+        if (contentLength < 0)
+            return string.Empty;
+
+        var body = new byte[contentLength];
+        if (!await ReadExactlyAsync(body, cancellationToken).ConfigureAwait(false))
+            return null;
+
+        return Encoding.UTF8.GetString(body);
+    }
+
+    private async Task<bool> FillBufferAsync(CancellationToken cancellationToken)
+    {
+        _bufStart = 0;
+        _bufEnd = await _inStream!.ReadAsync(_buf.AsMemory(), cancellationToken).ConfigureAwait(false);
+        return _bufEnd > 0;
+    }
+
+    /// <summary>
+    /// Reads an ASCII header line terminated by CRLF (or LF). Null on end of input.
+    /// </summary>
+    private async Task<string?> ReadHeaderLineAsync(CancellationToken cancellationToken)
+    {
+        var sb = new StringBuilder();
+        while (true)
+        {
+            if (_bufStart >= _bufEnd && !await FillBufferAsync(cancellationToken).ConfigureAwait(false))
+                return null;
+
+            var b = _buf[_bufStart++];
+            if (b == (byte)'\n')
+            {
+                if (sb.Length > 0 && sb[sb.Length - 1] == '\r')
+                    sb.Length--;
+                return sb.ToString();
+            }
+            sb.Append((char)b);
+        }
+    }
+
+    private async Task<bool> ReadExactlyAsync(byte[] target, CancellationToken cancellationToken)
+    {
+        var filled = 0;
+        while (filled < target.Length)
+        {
+            if (_bufStart >= _bufEnd && !await FillBufferAsync(cancellationToken).ConfigureAwait(false))
+                return false;
+
+            var n = Math.Min(target.Length - filled, _bufEnd - _bufStart);
+            Buffer.BlockCopy(_buf, _bufStart, target, filled, n);
+            _bufStart += n;
+            filled += n;
+        }
+        return true;
+    }
+
     private async Task<string?> ReadMessageAsync(CancellationToken cancellationToken)
     {
         // Read headers
         var headers = new Dictionary<string, string>();
         string? line;
 
-        while ((line = await _input.ReadLineAsync(cancellationToken).ConfigureAwait(false)) != null)
+        while ((line = await _input!.ReadLineAsync(cancellationToken).ConfigureAwait(false)) != null)
         {
             if (string.IsNullOrEmpty(line))
                 break;
@@ -393,7 +500,16 @@ public class GDStdioJsonRpcTransport : IGDJsonRpcTransport
             var json = _serializer.Serialize(message);
             var bytes = Encoding.UTF8.GetBytes(json);
 
-            await _output.WriteAsync($"Content-Length: {bytes.Length}\r\n\r\n").ConfigureAwait(false);
+            if (_outStream != null)
+            {
+                var header = Encoding.ASCII.GetBytes($"Content-Length: {bytes.Length}\r\n\r\n");
+                await _outStream.WriteAsync(header).ConfigureAwait(false);
+                await _outStream.WriteAsync(bytes).ConfigureAwait(false);
+                await _outStream.FlushAsync().ConfigureAwait(false);
+                return;
+            }
+
+            await _output!.WriteAsync($"Content-Length: {bytes.Length}\r\n\r\n").ConfigureAwait(false);
             await _output.WriteAsync(json).ConfigureAwait(false);
             await _output.FlushAsync().ConfigureAwait(false);
         }

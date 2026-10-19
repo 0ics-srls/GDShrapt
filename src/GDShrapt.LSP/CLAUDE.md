@@ -65,6 +65,16 @@ int lspCharacter = cliColumn - 1;
 - `abstract` modifier: methods with `@abstract` annotation → italic in most themes
 - `defaultLibrary` modifier: methods overriding base class methods (built-in Godot virtuals or project scripts) → subtle accent
 
+## Transports
+
+- **stdio framing is byte-exact**: `GDStdioJsonRpcTransport(serializer, Stream, Stream)` (used by `Program.cs`
+  via `Console.OpenStandardInput/Output`) reads ASCII headers and exactly `Content-Length` **UTF-8 bytes**
+  of body, so raw non-ASCII JSON from clients cannot desynchronise the stream. Header blocks without a
+  valid `Content-Length` are skipped. The `TextReader/TextWriter` constructor is legacy (tests only).
+- Outgoing-request completions use `RunContinuationsAsynchronously`: a handler resumed by a client
+  response never runs on the reader loop, so the reader keeps dispatching while it works.
+- `Completion` completes when the read loop ends (end of input or stop).
+
 ## Important Notes
 
 - **LSP = Strict mode only** — Pro module is NOT loaded in LSP (by design)
