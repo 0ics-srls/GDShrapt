@@ -215,6 +215,7 @@ SCREAMING_SNAKE_CASE naming rule will not apply to it.
 - Auto-update indentation: `declaration.UpdateIntendation()`
 - Clone nodes with `.Clone()`
 - Thread-safe project analysis: `ConcurrentDictionary` in `GDProjectTypesProvider` + `Parallel.ForEach` in `AnalyzeAll()`
+- `LoadScripts()` enumerates the project's files in order, then reads + parses them in parallel (`GDScriptReader` keeps its state per call). The LSP runs with server GC (`ServerGarbageCollection` in `GDShrapt.LSP.csproj`)
 - Comment-based suppression: `# gdvalidate:ignore`, `# gdlint:ignore/disable/enable`
 - Config hierarchy: Defaults → `.gdshrapt.json` → CLI flags
 

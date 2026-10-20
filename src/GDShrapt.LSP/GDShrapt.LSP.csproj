@@ -9,6 +9,9 @@
     <RootNamespace>GDShrapt.LSP</RootNamespace>
     <AssemblyName>GDShrapt.LSP</AssemblyName>
     <Description>Language Server Protocol implementation for GDScript</Description>
+    <!-- Project analysis is allocation-heavy and parallel: server GC (per-core heaps) cuts wall time ~28%
+         on a 1700-script project (LSAI#48). -->
+    <ServerGarbageCollection>true</ServerGarbageCollection>
   </PropertyGroup>
 
   <ItemGroup>

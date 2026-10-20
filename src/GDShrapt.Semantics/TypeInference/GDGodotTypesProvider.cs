@@ -122,11 +122,20 @@ public class GDGodotTypesProvider : IGDRuntimeProvider
         return _knownTypes.Contains(typeName) || _typeCache.ContainsKey(typeName);
     }
 
+    // Godot types are immutable: each type's info is built once (rebuilding the member list on every call
+    // cost ~12 s CPU on an 1800-script project, LSAI#48).
+    private readonly ConcurrentDictionary<string, GDRuntimeTypeInfo?> _typeInfoCache = new();
+
     public GDRuntimeTypeInfo? GetTypeInfo(string typeName)
     {
         if (string.IsNullOrEmpty(typeName))
             return null;
 
+        return _typeInfoCache.GetOrAdd(typeName, BuildTypeInfo);
+    }
+
+    private GDRuntimeTypeInfo? BuildTypeInfo(string typeName)
+    {
         if (!_typeCache.TryGetValue(typeName, out var typeData))
             return null;
 

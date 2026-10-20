@@ -256,12 +256,12 @@ internal class GDContainerTypeAnalyzer
     /// </summary>
     private static bool ContainsNode(GDNode container, GDNode target)
     {
-        if (container == target)
-            return true;
-
-        foreach (var node in container.AllNodes)
+        // In a tree, "container's subtree holds target" == "container is target or one of its ancestors":
+        // walk target's parent chain (O(depth)) instead of enumerating container's whole subtree, which
+        // made every usage lookup scale with the size of the enclosing statement (LSAI#48).
+        for (GDNode? node = target; node != null; node = node.Parent)
         {
-            if (node == target)
+            if (node == container)
                 return true;
         }
 

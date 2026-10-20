@@ -252,15 +252,20 @@ public class GDScriptProject : IGDScriptProvider, IDisposable
         // dot-folders are not part of it.
         var allScripts = GDGodotProjectFiles.Enumerate(_fileSystem, _context.ProjectPath, "*.gd");
 
+        var loaded = new List<GDScriptFile>();
         foreach (var scriptFile in allScripts)
         {
             _logger.Debug($"Loading script '{Path.GetFileName(scriptFile)}'");
 
             var reference = new GDScriptReference(scriptFile, _context);
             var script = CreateScriptFile(reference);
-            _scripts.TryAdd(reference, script);
-            script.Reload();
+            if (_scripts.TryAdd(reference, script))
+                loaded.Add(script);
         }
+
+        // Read + parse are independent per file (the reader keeps its state per call), and they dominate
+        // project load: parse in parallel (LSAI#48).
+        Parallel.ForEach(loaded, script => script.Reload());
 
         _logger.Debug($"Project loaded: {_scripts.Count} scripts");
         _projectTypesDirty = true;
