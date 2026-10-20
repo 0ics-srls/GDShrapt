@@ -1099,8 +1099,14 @@ namespace GDShrapt.Reader
 
             // Children are already cached, so this sums in O(direct tokens)
             var newLinesCount = 0;
+            var nodeCount = 1;
             for (int i = 0; i < _frozenSnapshot.Length; i++)
+            {
                 newLinesCount += _frozenSnapshot[i].NewLinesCount;
+                if (_frozenSnapshot[i] is GDNode child)
+                    nodeCount += child._subtreeNodeCountHint;
+            }
+            _owner._subtreeNodeCountHint = nodeCount;
 
             _owner._cachedNewLinesCount = newLinesCount;
             _owner._newLinesCountCached = true;

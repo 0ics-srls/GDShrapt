@@ -66,6 +66,27 @@ func run(x, y = 2):
             Assert.IsTrue(Walk(frozen, backward: false).Count > 100, "the probe script must exercise a real tree");
         }
 
+        [TestMethod]
+        public void NodeIndex_OfAFrozenTree_MatchesTheMutableTree()
+        {
+            var reader = new GDScriptReader();
+            var mutable = reader.ParseFileContent(Script);
+            var frozen = reader.ParseFileContent(Script);
+            frozen.Freeze();
+
+            var expected = GDAstNodeIndex.Build(mutable);
+            var actual = GDAstNodeIndex.Build(frozen);
+
+            Assert.AreEqual(expected.TotalCount, actual.TotalCount);
+            Assert.AreEqual(mutable.AllNodes.Count() + 1, actual.TotalCount, "every node plus the root");
+            CollectionAssert.AreEqual(
+                expected.AllNodes.Select(n => n.TypeName).ToList(),
+                actual.AllNodes.Select(n => n.TypeName).ToList());
+            Assert.AreEqual(expected.GetNodes<GDMethodDeclaration>().Count, actual.GetNodes<GDMethodDeclaration>().Count);
+            Assert.AreEqual(mutable.FirstLeafToken?.ToString(), frozen.FirstLeafToken?.ToString());
+            Assert.AreEqual(mutable.LastLeafToken?.ToString(), frozen.LastLeafToken?.ToString());
+        }
+
         private static string ArrayOf(int count)
         {
             var sb = new StringBuilder("var a = [");

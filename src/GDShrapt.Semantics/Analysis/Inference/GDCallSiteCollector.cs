@@ -32,8 +32,17 @@ internal class GDCallSiteCollector
     /// <param name="declaringTypeName">The type where the method is declared (class_name or script path).</param>
     /// <param name="methodName">The method name to find call sites for.</param>
     /// <returns>List of call site information with argument types.</returns>
-    // Call-name index: method name → scripts that contain a call with that name (D7a: visit only those).
-    private Dictionary<string, List<GDScriptFile>>? _nameIndex;
+    // Call-name index: method name → the scripts containing a call with that name, each with those calls in
+    // tree (pre-)order (D7a). Collection evaluates only the indexed calls instead of re-walking every calling
+    // script's whole AST once per inferred method (LSAI#48).
+    private Dictionary<string, List<ScriptCalls>>? _nameIndex;
+
+    private sealed class ScriptCalls
+    {
+        public ScriptCalls(GDScriptFile script) => Script = script;
+        public GDScriptFile Script { get; }
+        public List<GDCallExpression> Calls { get; } = new();
+    }
     private readonly Dictionary<string, int> _invocations = new(System.StringComparer.Ordinal);
 
     /// <summary>
@@ -51,22 +60,26 @@ internal class GDCallSiteCollector
 
     /// <summary>Scripts that contain at least one call named <paramref name="methodName"/>.</summary>
     internal IReadOnlyList<GDScriptFile> ScriptsCalling(string methodName) =>
-        NameIndex().TryGetValue(methodName, out var scripts) ? scripts : (IReadOnlyList<GDScriptFile>)System.Array.Empty<GDScriptFile>();
+        NameIndex().TryGetValue(methodName, out var scripts)
+            ? scripts.Select(s => s.Script).ToList()
+            : (IReadOnlyList<GDScriptFile>)System.Array.Empty<GDScriptFile>();
 
-    private Dictionary<string, List<GDScriptFile>> NameIndex()
+    private Dictionary<string, List<ScriptCalls>> NameIndex()
     {
         if (_nameIndex != null)
             return _nameIndex;
 
-        var index = new Dictionary<string, List<GDScriptFile>>(System.StringComparer.Ordinal);
+        var index = new Dictionary<string, List<ScriptCalls>>(System.StringComparer.Ordinal);
+        var names = new List<string>(2);
         foreach (var script in _project.ScriptFiles)
         {
             if (script.Class == null)
                 continue;
 
-            var names = new HashSet<string>(System.StringComparer.Ordinal);
+            // AllNodes is pre-order, the order in which a visitor's Visit(GDCallExpression) sees the calls.
             foreach (var call in script.Class.AllNodes.OfType<GDCallExpression>())
             {
+                names.Clear();
                 switch (call.CallerExpression)
                 {
                     case GDIdentifierExpression id when id.Identifier?.Sequence is { } direct:
@@ -79,18 +92,20 @@ internal class GDCallSiteCollector
                         {
                             var resolver = GDStaticStringExtractor.CreateClassResolver(call.RootClassDeclaration);
                             var target = GDStaticStringExtractor.TryExtractString(first, resolver);
-                            if (!string.IsNullOrEmpty(target))
+                            if (!string.IsNullOrEmpty(target) && target != name)
                                 names.Add(target!);
                         }
                         break;
                 }
-            }
 
-            foreach (var name in names)
-            {
-                if (!index.TryGetValue(name, out var list))
-                    index[name] = list = new List<GDScriptFile>();
-                list.Add(script);
+                foreach (var name in names)
+                {
+                    if (!index.TryGetValue(name, out var scripts))
+                        index[name] = scripts = new List<ScriptCalls>();
+                    if (scripts.Count == 0 || !ReferenceEquals(scripts[scripts.Count - 1].Script, script))
+                        scripts.Add(new ScriptCalls(script));
+                    scripts[scripts.Count - 1].Calls.Add(call);
+                }
             }
         }
 
@@ -124,20 +139,21 @@ internal class GDCallSiteCollector
             return;
         visited.Add(key);
 
-        foreach (var scriptFile in ScriptsCalling(methodName))
+        if (NameIndex().TryGetValue(methodName, out var callingScripts))
         {
-            var collector = new ScriptCallSiteVisitor(
-                scriptFile,
-                declaringTypeName,
-                methodName,
-                _runtimeProvider);
-
-            if (scriptFile.Class != null)
+            foreach (var entry in callingScripts)
             {
-                scriptFile.Class.WalkIn(collector);
-            }
+                var collector = new ScriptCallSiteVisitor(
+                    entry.Script,
+                    declaringTypeName,
+                    methodName,
+                    _runtimeProvider);
 
-            callSites.AddRange(collector.CallSites);
+                foreach (var call in entry.Calls)
+                    collector.Visit(call);
+
+                callSites.AddRange(collector.CallSites);
+            }
         }
 
         // Also collect call sites from parent classes that define the same method.

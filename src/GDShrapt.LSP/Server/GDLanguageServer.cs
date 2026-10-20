@@ -149,6 +149,10 @@ public class GDLanguageServer : IGDLanguageServer
 
         if (!string.IsNullOrEmpty(rootPath))
         {
+            // Load the Godot type database (~0.8 s, serial) while the project's scripts are parsed; first users
+            // of the shared provider wait for it (Lazy, ExecutionAndPublication). LSAI#48
+            _ = Task.Run(() => GDGodotTypesProvider.Shared);
+
             GDScriptProject? project = null;
             try
             {

@@ -7,12 +7,14 @@ namespace GDShrapt.Reader
     {
         private readonly HashSet<Type> _filter;
 
-        public List<GDNode> AllNodes { get; } = new List<GDNode>();
+        public List<GDNode> AllNodes { get; }
         public Dictionary<Type, List<GDNode>> NodesByType { get; } = new Dictionary<Type, List<GDNode>>();
 
-        public GDAstNodeIndexCollector(Type[] filter)
+        /// <param name="expectedNodes">Capacity hint for <see cref="AllNodes"/> (a frozen root knows its node count).</param>
+        public GDAstNodeIndexCollector(Type[] filter, int expectedNodes = 0)
         {
             _filter = filter != null ? new HashSet<Type>(filter) : null;
+            AllNodes = new List<GDNode>(expectedNodes);
         }
 
         public override void WillVisit(GDNode node)

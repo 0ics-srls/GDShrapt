@@ -246,6 +246,10 @@ namespace GDShrapt.Reader
         internal int _cachedStartLine;
         internal bool _startLineCached;
 
+        // Nodes in this subtree (itself included), counted by Freeze(); 0 = unknown. Only a capacity hint for
+        // collections sized by the tree (GDAstNodeIndex), never used for correctness.
+        internal int _subtreeNodeCountHint;
+
         /// <summary>
         /// Number of new lines inside the node. Cached by <see cref="Freeze"/> for O(1) access.
         /// </summary>
@@ -262,6 +266,19 @@ namespace GDShrapt.Reader
             _startLineCached = true;
 
             var line = startLine;
+
+            var tokens = Form.FrozenTokens;
+            if (tokens != null)
+            {
+                for (var i = 0; i < tokens.Length; i++)
+                {
+                    if (tokens[i] is GDNode node)
+                        node.FillPositionCaches(line);
+
+                    line += tokens[i].NewLinesCount;
+                }
+                return;
+            }
 
             foreach (var token in Form.Direct())
             {
@@ -468,6 +485,22 @@ namespace GDShrapt.Reader
 
         internal GDSyntaxToken FindFirstLeafToken()
         {
+            var tokens = Form.FrozenTokens;
+            if (tokens != null)
+            {
+                for (var i = 0; i < tokens.Length; i++)
+                {
+                    if (tokens[i] is GDNode node)
+                    {
+                        var leaf = node.FirstLeafToken;
+                        if (leaf != null) return leaf;
+                    }
+                    else
+                        return tokens[i];
+                }
+                return null;
+            }
+
             foreach (var token in Form.Direct())
             {
                 if (token is GDNode node)
@@ -483,6 +516,23 @@ namespace GDShrapt.Reader
 
         internal GDSyntaxToken FindLastLeafToken()
         {
+            // Frozen: index the snapshot backwards instead of materialising the reversed copy
+            var tokens = Form.FrozenTokens;
+            if (tokens != null)
+            {
+                for (var i = tokens.Length - 1; i >= 0; i--)
+                {
+                    if (tokens[i] is GDNode node)
+                    {
+                        var leaf = node.LastLeafToken;
+                        if (leaf != null) return leaf;
+                    }
+                    else
+                        return tokens[i];
+                }
+                return null;
+            }
+
             foreach (var token in Form.Reversed())
             {
                 if (token is GDNode node)

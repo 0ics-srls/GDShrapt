@@ -628,11 +628,11 @@ public class GDProjectTypesProvider : IGDRuntimeProvider
     /// <returns>A tuple of (member info, declaring type name) or (null, null) if not found.</returns>
     public (GDRuntimeMemberInfo? Member, string? DeclaringTypeName) GetMemberWithDeclaringType(string typeName, string memberName)
     {
-        return GetMemberWithDeclaringTypeInternal(typeName, memberName, new HashSet<string>());
+        return GetMemberWithDeclaringTypeInternal(typeName, memberName, visited: null);
     }
 
     private (GDRuntimeMemberInfo? Member, string? DeclaringTypeName) GetMemberWithDeclaringTypeInternal(
-        string typeName, string memberName, HashSet<string> visited)
+        string typeName, string memberName, HashSet<string>? visited)
     {
         if (string.IsNullOrEmpty(typeName) || string.IsNullOrEmpty(memberName))
             return (null, null);
@@ -642,8 +642,9 @@ public class GDProjectTypesProvider : IGDRuntimeProvider
         if (resolvedName == null || !_typeCache.TryGetValue(resolvedName, out var projectType))
             return (null, null);
 
-        // Prevent infinite recursion by tracking visited types
-        if (!visited.Add(resolvedName))
+        // Prevent infinite recursion by tracking visited types (the set exists once the walk reaches a base type:
+        // most lookups end in the type itself and allocate nothing)
+        if (visited != null && !visited.Add(resolvedName))
             return (null, null);
 
         // Use resolved name for return value (class_name, not path)
@@ -715,6 +716,7 @@ public class GDProjectTypesProvider : IGDRuntimeProvider
         // Check base type - propagate the declaring type from base
         if (!string.IsNullOrEmpty(projectType.BaseTypeName))
         {
+            visited ??= new HashSet<string> { resolvedName };
             var baseResult = GetMemberWithDeclaringTypeInternal(projectType.BaseTypeName, memberName, visited);
             if (baseResult.Member != null)
                 return baseResult;
