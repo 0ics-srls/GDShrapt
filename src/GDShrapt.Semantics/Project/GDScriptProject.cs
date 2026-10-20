@@ -521,20 +521,31 @@ public class GDScriptProject : IGDScriptProvider, IDisposable
             }
         }
 
-        // Pass 2: Code groups (add_to_group calls)
+        // Pass 2: Code groups (add_to_group calls). The per-script walks only read frozen trees, so they run in
+        // parallel; registration stays sequential in script order (LSAI#48).
         var crossClassResolver = GDStaticStringExtractor.CreateCrossClassResolver(this);
-        foreach (var script in ScriptFiles)
+        var scripts = ScriptFiles.ToList();
+        var collected = new List<GDAddToGroupInfo>?[scripts.Count];
+        Parallel.For(0, scripts.Count, i =>
         {
-            if (script.Class == null) continue;
+            var script = scripts[i];
+            if (script.Class == null) return;
 
             var classResolver = GDStaticStringExtractor.CreateClassResolver(script.Class);
             var collector = new GDGroupCollector(classResolver, crossClassResolver);
             script.Class.WalkIn(collector);
+            collected[i] = collector.AddToGroupCalls;
+        });
+
+        for (var i = 0; i < scripts.Count; i++)
+        {
+            var script = scripts[i];
+            if (script.Class == null) continue;
 
             var typeName = script.TypeName ?? script.Class?.ClassName?.Identifier?.Sequence;
             if (typeName == null) continue;
 
-            foreach (var call in collector.AddToGroupCalls)
+            foreach (var call in collected[i]!)
             {
                 if (!call.IsOnSelf) continue;
                 registry.RegisterMember(call.GroupName, new GDGroupMembership
