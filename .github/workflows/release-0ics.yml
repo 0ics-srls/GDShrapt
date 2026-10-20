@@ -38,16 +38,27 @@ jobs:
           dotnet test src/GDShrapt.sln -c Release --no-build
           --filter "TestCategory!=StressTests&TestCategory!=LongRunning&TestCategory!=ManualVerification&TestCategory!=SmokeTests&TestCategory!=Performance&TestCategory!=Memory"
       - name: Publish
+        # One portable zip (any platform, JIT) plus one ReadyToRun zip per RID (precompiled: faster start and
+        # first analysis, LSAI#48). All framework-dependent net10, launched the same way: dotnet GDShrapt.LSP.dll.
         run: |
+          ver="${{ steps.v.outputs.ver }}"
+          pack() { # dir zip-name
+            echo "$ver" > "$1/VERSION"
+            (cd "$1" && zip -qr "../$2" .)
+            sha256sum "$2" > "$2.sha256"
+          }
           dotnet publish src/GDShrapt.LSP -c Release -o out --no-self-contained -p:VersionSuffix=alpha.7.${{ steps.v.outputs.n }}
-          echo "${{ steps.v.outputs.ver }}" > out/VERSION
-          (cd out && zip -qr "../gdshrapt-lsp-${{ steps.v.outputs.ver }}.zip" .)
-          sha256sum "gdshrapt-lsp-${{ steps.v.outputs.ver }}.zip" > "gdshrapt-lsp-${{ steps.v.outputs.ver }}.zip.sha256"
+          pack out "gdshrapt-lsp-$ver.zip"
+          for rid in linux-x64 linux-arm64 osx-x64 osx-arm64 win-x64 win-arm64; do
+            dotnet publish src/GDShrapt.LSP -c Release -r "$rid" --no-self-contained -p:PublishReadyToRun=true \
+              -o "out-$rid" -p:VersionSuffix=alpha.7.${{ steps.v.outputs.n }}
+            pack "out-$rid" "gdshrapt-lsp-$ver-$rid.zip"
+          done
       - name: Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: >
           gh release create "${{ steps.v.outputs.tag }}"
-          "gdshrapt-lsp-${{ steps.v.outputs.ver }}.zip" "gdshrapt-lsp-${{ steps.v.outputs.ver }}.zip.sha256"
+          gdshrapt-lsp-${{ steps.v.outputs.ver }}*.zip gdshrapt-lsp-${{ steps.v.outputs.ver }}*.zip.sha256
           --target "${{ github.sha }}" --title "GDShrapt LSP (0ics) ${{ steps.v.outputs.ver }}"
-          --notes "Fork build for LSAI (framework-dependent net10, run with: dotnet GDShrapt.LSP.dll --stdio). See 0ics/README.md."
+          --notes "Fork build for LSAI (framework-dependent net10, run with: dotnet GDShrapt.LSP.dll --stdio). gdshrapt-lsp-VER-RID.zip = ReadyToRun build for that platform; gdshrapt-lsp-VER.zip = portable. See 0ics/README.md."
