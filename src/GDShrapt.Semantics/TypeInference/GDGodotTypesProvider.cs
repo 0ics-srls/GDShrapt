@@ -44,6 +44,7 @@ public class GDGodotTypesProvider : IGDRuntimeProvider
     private void BuildTypeCache()
     {
         _buildTypeInfo = BuildTypeInfo;
+        _scanTypesWithMethod = ScanTypesWithMethod;
         _buildMember = key => GetMemberInternal(key.Type, key.Member, new HashSet<string>());
 
         if (_assemblyData?.TypeDatas == null)
@@ -134,6 +135,10 @@ public class GDGodotTypesProvider : IGDRuntimeProvider
     // list) per call. Member infos are never mutated after construction.
     private readonly ConcurrentDictionary<(string Type, string Member), GDRuntimeMemberInfo?> _memberCache = new();
     private Func<(string Type, string Member), GDRuntimeMemberInfo?> _buildMember = null!;
+
+    // FindTypesWithMethod scanned every Godot type per call (~1.5 s CPU per project analysis); the answer is fixed.
+    private readonly ConcurrentDictionary<string, IReadOnlyList<string>> _typesWithMethodCache = new(StringComparer.Ordinal);
+    private Func<string, IReadOnlyList<string>> _scanTypesWithMethod = null!;
 
     public GDRuntimeTypeInfo? GetTypeInfo(string typeName)
     {
@@ -807,6 +812,11 @@ public class GDGodotTypesProvider : IGDRuntimeProvider
         if (string.IsNullOrEmpty(methodName))
             return Array.Empty<string>();
 
+        return _typesWithMethodCache.GetOrAdd(methodName, _scanTypesWithMethod);
+    }
+
+    private IReadOnlyList<string> ScanTypesWithMethod(string methodName)
+    {
         var result = new List<string>();
 
         foreach (var kvp in _typeCache)
@@ -820,7 +830,7 @@ public class GDGodotTypesProvider : IGDRuntimeProvider
             }
         }
 
-        return result;
+        return result.ToArray();
     }
 
     /// <summary>

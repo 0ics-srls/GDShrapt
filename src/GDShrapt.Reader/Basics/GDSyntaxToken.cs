@@ -160,6 +160,35 @@ namespace GDShrapt.Reader
                 int start = 0;
                 bool found = false;
 
+                // Frozen parent: the same backward scan over its token array (no reversed copy, no enumerator)
+                var frozen = parent.Form.FrozenTokens;
+                if (frozen != null)
+                {
+                    var i = frozen.Length - 1;
+                    while (i >= 0 && !ReferenceEquals(frozen[i], this))
+                        i--;
+
+                    for (i--; i >= 0; i--)
+                    {
+                        var item = frozen[i];
+                        if (item is GDNode node)
+                        {
+                            if (node.CheckNewLine(out var tokensCount))
+                                return start + tokensCount;
+                            start += tokensCount;
+                        }
+                        else
+                        {
+                            if (item.NewLinesCount == 0)
+                                start += item.Length;
+                            else
+                                return start;
+                        }
+                    }
+
+                    return parent.StartColumn + start;
+                }
+
                 foreach (var item in parent.TokensReversed)
                 {
                     if (item == this)

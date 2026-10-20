@@ -87,6 +87,33 @@ func run(x, y = 2):
             Assert.AreEqual(mutable.LastLeafToken?.ToString(), frozen.LastLeafToken?.ToString());
         }
 
+        [TestMethod]
+        public void Positions_OfAFrozenTree_MatchTheMutableTree()
+        {
+            var reader = new GDScriptReader();
+            var mutable = reader.ParseFileContent(Script).AllTokens.ToList();
+            var frozenTree = reader.ParseFileContent(Script);
+            frozenTree.Freeze();
+            var frozen = frozenTree.AllTokens.ToList();
+
+            Assert.AreEqual(mutable.Count, frozen.Count);
+            for (var i = 0; i < frozen.Count; i++)
+            {
+                Assert.AreEqual(mutable[i].StartLine, frozen[i].StartLine, $"line of token {i} '{frozen[i]}'");
+                Assert.AreEqual(mutable[i].StartColumn, frozen[i].StartColumn, $"column of token {i} '{frozen[i]}'");
+                Assert.AreEqual(mutable[i].EndColumn, frozen[i].EndColumn, $"end column of token {i} '{frozen[i]}'");
+            }
+
+            var mutableNodes = reader.ParseFileContent(Script).AllNodes.ToList();
+            var frozenNodes = frozenTree.AllNodes.ToList();
+            for (var i = 0; i < frozenNodes.Count; i++)
+            {
+                Assert.AreEqual(mutableNodes[i].StartColumn, frozenNodes[i].StartColumn, $"column of node {i} {frozenNodes[i].TypeName}");
+                Assert.AreEqual(mutableNodes[i].CheckNewLine(out var m), frozenNodes[i].CheckNewLine(out var f), $"newline of node {i}");
+                Assert.AreEqual(m, f, $"chars before the last newline of node {i}");
+            }
+        }
+
         private static string ArrayOf(int count)
         {
             var sb = new StringBuilder("var a = [");

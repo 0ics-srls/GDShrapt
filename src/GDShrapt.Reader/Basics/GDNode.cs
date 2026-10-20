@@ -130,6 +130,11 @@ namespace GDShrapt.Reader
         {
             tokensCount = 0;
 
+            // Frozen: the same reversed leaf scan by direct recursion over the token arrays (AllTokensReversed
+            // nests one iterator per tree level and materialises reversed copies)
+            if (Form.FrozenTokens != null)
+                return CheckNewLineFrozen(this, ref tokensCount);
+
             foreach (var token in AllTokensReversed)
             {
                 if (token.NewLinesCount > 0)
@@ -137,6 +142,37 @@ namespace GDShrapt.Reader
                 tokensCount += token.Length;
             }
 
+            return false;
+        }
+
+        private static bool CheckNewLineFrozen(GDNode node, ref int tokensCount)
+        {
+            var tokens = node.Form.FrozenTokens;
+            if (tokens == null)
+            {
+                foreach (var token in node.AllTokensReversed)
+                {
+                    if (token.NewLinesCount > 0)
+                        return true;
+                    tokensCount += token.Length;
+                }
+                return false;
+            }
+
+            for (var i = tokens.Length - 1; i >= 0; i--)
+            {
+                if (tokens[i] is GDNode child)
+                {
+                    if (CheckNewLineFrozen(child, ref tokensCount))
+                        return true;
+                }
+                else
+                {
+                    if (tokens[i].NewLinesCount > 0)
+                        return true;
+                    tokensCount += tokens[i].Length;
+                }
+            }
             return false;
         }
 

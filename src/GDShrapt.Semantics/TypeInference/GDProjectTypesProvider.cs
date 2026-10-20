@@ -54,6 +54,7 @@ public class GDProjectTypesProvider : IGDRuntimeProvider
     /// </summary>
     public void RebuildCache()
     {
+        _typesWithMethodCache.Clear();
         _typeCache.Clear();
         _runtimeTypeInfoCache.Clear();
         _pathToTypeName.Clear();
@@ -149,6 +150,9 @@ public class GDProjectTypesProvider : IGDRuntimeProvider
                 _preloadAliasToTypeName[alias] = canonicalName;
             }
         }
+
+        // Drop answers computed by concurrent readers while the cache was being rebuilt
+        _typesWithMethodCache.Clear();
     }
 
     /// <summary>
@@ -965,14 +969,21 @@ public class GDProjectTypesProvider : IGDRuntimeProvider
         if (string.IsNullOrEmpty(methodName))
             return Array.Empty<string>();
 
-        var result = new List<string>();
-        foreach (var kvp in _typeCache)
+        return _typesWithMethodCache.GetOrAdd(methodName, static (name, types) =>
         {
-            if (kvp.Value.Methods.ContainsKey(methodName))
-                result.Add(kvp.Key);
-        }
-        return result;
+            var result = new List<string>();
+            foreach (var kvp in types)
+            {
+                if (kvp.Value.Methods.ContainsKey(name))
+                    result.Add(kvp.Key);
+            }
+            return result.ToArray();
+        }, _typeCache);
     }
+
+    // FindTypesWithMethod scanned every project type per call; the answer only changes with RebuildCache
+    // (the only writer of _typeCache), which clears it before and after rebuilding (LSAI#48).
+    private readonly ConcurrentDictionary<string, IReadOnlyList<string>> _typesWithMethodCache = new(StringComparer.Ordinal);
 
     /// <summary>
     /// Finds all project types that have a specific property defined directly.
