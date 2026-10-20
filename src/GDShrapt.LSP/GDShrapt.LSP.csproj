@@ -15,6 +15,14 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Classic server GC with a bounded heap count instead of DATAS (.NET 10 default): DATAS keeps gen0 budgets
+         small and collects ~40x per analysis; 8 heaps cut the 1700-script analysis by ~14% for ~+0.5 GB
+         (all heaps: same time, ~+1.7 GB). The runtime caps the count at the machine's cores. LSAI#48 -->
+    <RuntimeHostConfigurationOption Include="System.GC.DynamicAdaptationMode" Value="0" />
+    <RuntimeHostConfigurationOption Include="System.GC.HeapCount" Value="8" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\GDShrapt.Semantics\GDShrapt.Semantics.csproj" />
     <ProjectReference Include="..\GDShrapt.Formatter\GDShrapt.Formatter.csproj" />
     <ProjectReference Include="..\GDShrapt.CLI.Core\GDShrapt.CLI.Core.csproj" />

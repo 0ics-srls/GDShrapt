@@ -1,3 +1,4 @@
 [submodule "submodules/GDShrapt.TypesMap"]
 	path = submodules/GDShrapt.TypesMap
-	url = https://github.com/elamaunt/GDShrapt.TypesMap
+	url = https://github.com/0ics-srls/GDShrapt.TypesMap
+	branch = main-0ics
