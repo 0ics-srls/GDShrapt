@@ -112,6 +112,7 @@ public class GDLanguageServer : IGDLanguageServer
         _transport.OnRequest<GDCallHierarchyOutgoingCallsParams, GDLspCallHierarchyOutgoingCall[]?>("callHierarchy/outgoingCalls", HandleOutgoingCallsAsync);
 
         // Type hierarchy
+        _transport.OnRequest<GDDocumentDiagnosticParams, GDFullDocumentDiagnosticReport>("textDocument/diagnostic", HandleDocumentDiagnosticAsync);
         _transport.OnRequest<GDTypeHierarchyPrepareParams, GDLspTypeHierarchyItem[]?>("textDocument/prepareTypeHierarchy", (p, ct) => TypeHierarchy()?.PrepareAsync(p, ct) ?? Task.FromResult<GDLspTypeHierarchyItem[]?>(null));
         _transport.OnRequest<GDTypeHierarchyItemParams, GDLspTypeHierarchyItem[]?>("typeHierarchy/supertypes", (p, ct) => TypeHierarchy()?.SupertypesAsync(p, ct) ?? Task.FromResult<GDLspTypeHierarchyItem[]?>(null));
         _transport.OnRequest<GDTypeHierarchyItemParams, GDLspTypeHierarchyItem[]?>("typeHierarchy/subtypes", (p, ct) => TypeHierarchy()?.SubtypesAsync(p, ct) ?? Task.FromResult<GDLspTypeHierarchyItem[]?>(null));
@@ -254,6 +255,7 @@ public class GDLanguageServer : IGDLanguageServer
                 },
                 CallHierarchyProvider = true,
                 TypeHierarchyProvider = true,
+                DiagnosticProvider = new GDDiagnosticOptions(),
                 TypeDefinitionProvider = true,
                 ImplementationProvider = true,
                 WorkspaceSymbolProvider = true,
@@ -424,6 +426,20 @@ public class GDLanguageServer : IGDLanguageServer
     #endregion
 
     #region Document Sync Handlers
+
+    /// <summary>
+    /// Pull diagnostics: the full analysis (syntax + validator + linter + semantics) of the document's
+    /// current text. didOpen/didChange are applied synchronously on the read loop, so a pull always sees
+    /// every change sent before it.
+    /// </summary>
+    private async Task<GDFullDocumentDiagnosticReport> HandleDocumentDiagnosticAsync(
+        GDDocumentDiagnosticParams @params, CancellationToken cancellationToken)
+    {
+        var items = _diagnosticPublisher is null
+            ? []
+            : await _diagnosticPublisher.ComputeDiagnosticsAsync(@params.TextDocument.Uri).ConfigureAwait(false);
+        return new GDFullDocumentDiagnosticReport { Items = items };
+    }
 
     private Task HandleDidOpenAsync(GDDidOpenTextDocumentParams @params)
     {

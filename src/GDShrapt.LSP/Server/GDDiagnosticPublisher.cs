@@ -211,6 +211,33 @@ public class GDDiagnosticPublisher : IAsyncDisposable
         if (_disposed)
             return;
 
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var diagnostics = await ComputeDiagnosticsAsync(uri).ConfigureAwait(false);
+        var diagnoseMs = sw.ElapsedMilliseconds;
+
+        var @params = new GDPublishDiagnosticsParams
+        {
+            Uri = uri,
+            Version = version,
+            Diagnostics = diagnostics
+        };
+
+        await _transport.SendNotificationAsync("textDocument/publishDiagnostics", @params)
+            .ConfigureAwait(false);
+
+        sw.Stop();
+        GDLspPerformanceTrace.Log("diagnostics", $"PUBLISHED {System.IO.Path.GetFileName(GDDocumentManager.UriToPath(uri))} diagnose={diagnoseMs}ms total={sw.ElapsedMilliseconds}ms count={diagnostics.Length}");
+    }
+
+    /// <summary>
+    /// Full diagnostics (syntax + validator + linter + semantic validator) of the document's current text.
+    /// Shared by the push (publishDiagnostics) and pull (textDocument/diagnostic) paths.
+    /// </summary>
+    public async Task<GDLspDiagnostic[]> ComputeDiagnosticsAsync(string uri)
+    {
+        if (_disposed)
+            return [];
+
         var filename = System.IO.Path.GetFileName(GDDocumentManager.UriToPath(uri));
 
         // Wait for initial analysis to complete before publishing diagnostics.
@@ -264,20 +291,9 @@ public class GDDiagnosticPublisher : IAsyncDisposable
             diagnostics = [];
         }
 
-        var diagnoseMs = sw.ElapsedMilliseconds;
-
-        var @params = new GDPublishDiagnosticsParams
-        {
-            Uri = uri,
-            Version = version,
-            Diagnostics = diagnostics
-        };
-
-        await _transport.SendNotificationAsync("textDocument/publishDiagnostics", @params)
-            .ConfigureAwait(false);
-
         sw.Stop();
-        GDLspPerformanceTrace.Log("diagnostics", $"END {filename} diagnose={diagnoseMs}ms total={sw.ElapsedMilliseconds}ms hasModel={script?.CurrentSemanticModel != null} count={diagnostics.Length}");
+        GDLspPerformanceTrace.Log("diagnostics", $"END {filename} diagnose={sw.ElapsedMilliseconds}ms hasModel={script?.CurrentSemanticModel != null} count={diagnostics.Length}");
+        return diagnostics;
     }
 
     /// <summary>

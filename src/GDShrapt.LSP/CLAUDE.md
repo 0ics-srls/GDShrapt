@@ -36,7 +36,8 @@ They convert LSP protocol (0-based positions) to CLI.Core (1-based positions).
 | `GDLspDocumentLinkHandler` | `IGDDocumentLinkHandler` | textDocument/documentLink |
 | `GDRangeFormattingHandler` | `IGDFormatHandler` | textDocument/rangeFormatting |
 | `GDLspFileRenameHandler` | `IGDFileRenameHandler` | workspace/willRenameFiles |
-| `GDDiagnosticPublisher` | (uses GDScriptProject) | publishDiagnostics |
+| `GDDiagnosticPublisher` | (uses GDScriptProject) | publishDiagnostics (push, two debounced tiers) |
+| `GDLanguageServer.HandleDocumentDiagnosticAsync` | `GDDiagnosticPublisher.ComputeDiagnosticsAsync` | textDocument/diagnostic (pull, LSP 3.17: full report of the current text) |
 
 ## Position Conversion
 
@@ -55,6 +56,12 @@ int lspCharacter = cliColumn - 1;
 **Document sync:** Incremental (`GDDocumentManager.ApplyChanges` splices `{range, text}` edits).
 **Completion triggers:** `.`, `:`, `(`, `$`, `/`
 **Signature help triggers:** `(`, `,`
+
+**Pull diagnostics:** `diagnosticProvider` (`interFileDependencies: true`, `workspaceDiagnostics: false`).
+`textDocument/diagnostic` returns the full analysis (syntax + validator + linter + semantics) of the document's
+current text — the same computation as the semantic push tier, without its debounce. didOpen/didChange are
+applied synchronously on the read loop, so a pull always sees every change sent before it. Push diagnostics
+stay on (editors that do not pull).
 
 **Also advertised:** `selectionRangeProvider`, `documentLinkProvider`, `documentRangeFormattingProvider`,
 `foldingRangeProvider`, `callHierarchyProvider`, `typeDefinitionProvider`, `implementationProvider`,

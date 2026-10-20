@@ -31,6 +31,9 @@ public sealed class GDLspTestSession : IAsyncDisposable
 
     public ConcurrentQueue<JsonElement> Notifications { get; } = new();
 
+    /// <summary>The server's <c>initialize</c> result (capabilities).</summary>
+    public JsonElement InitializeResult { get; private set; }
+
     private GDLspTestSession()
     {
         _serverIn = new AnonymousPipeClientStream(PipeDirection.In, _toServer.ClientSafePipeHandle);
@@ -47,7 +50,7 @@ public sealed class GDLspTestSession : IAsyncDisposable
         var s = new GDLspTestSession();
         await s._server.InitializeAsync(s._transport, s._cts.Token);
         s._readLoop = Task.Run(s.ReadLoopAsync);
-        await s.RequestAsync("initialize", new
+        s.InitializeResult = await s.RequestAsync("initialize", new
         {
             processId = (int?)null,
             rootUri = new Uri(rootPath).AbsoluteUri,

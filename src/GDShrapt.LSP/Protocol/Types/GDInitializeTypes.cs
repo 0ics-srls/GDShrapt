@@ -302,6 +302,13 @@ public class GDServerCapabilities
     public bool? TypeHierarchyProvider { get; set; }
 
     /// <summary>
+    /// The server provides pull diagnostics (LSP 3.17 textDocument/diagnostic).
+    /// </summary>
+    [JsonPropertyName("diagnosticProvider")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public GDDiagnosticOptions? DiagnosticProvider { get; set; }
+
+    /// <summary>
     /// The server provides type definition support.
     /// </summary>
     [JsonPropertyName("typeDefinitionProvider")]
