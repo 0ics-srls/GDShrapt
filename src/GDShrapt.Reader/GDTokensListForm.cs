@@ -230,11 +230,11 @@ namespace GDShrapt.Reader
             if (item is null)
                 throw new ArgumentNullException(nameof(item));
 
-            if (_isFrozen && _frozenTokenIndex != null)
+            if (_isFrozen && _frozenSnapshot != null)
             {
                 // When frozen, we need to find index in typed items only
                 // First check if item is in the snapshot at all
-                if (!_frozenTokenIndex.ContainsKey(item))
+                if (!FrozenContains(item))
                     return -1;
 
                 // Count typed items before this one

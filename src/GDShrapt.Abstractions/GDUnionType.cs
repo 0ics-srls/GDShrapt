@@ -306,12 +306,53 @@ public class GDUnionType
         if (idx < 0)
             return;
 
-        var seen = _originSets![type];
+        var seen = OriginSet(this, type, list);
         seen.Remove(oldOrigin);
         if (seen.Add(newOrigin))
             list[idx] = newOrigin;
         else
             list.RemoveAt(idx); // newOrigin is already tracked: keep it once
+    }
+
+    /// <summary>
+    /// A mutable copy (never frozen) holding the same types and origins. Origins are immutable and shared by
+    /// reference; types without a concrete type (null/Variant) keep no origins, as with <see cref="AddType(GDSemanticType, GDTypeOrigin)"/>.
+    /// The origin membership index is rebuilt lazily on the copy's first write.
+    /// </summary>
+    public GDUnionType CloneUnion()
+    {
+        var clone = new GDUnionType
+        {
+            AllHighConfidence = AllHighConfidence,
+            CommonBaseType = CommonBaseType,
+            ConfidenceReason = ConfidenceReason
+        };
+
+        // Same insertion order as re-adding (origin types first, then the rest): EffectiveType reads Types.First().
+        if (_origins != null && _origins.Count > 0)
+        {
+            var origins = new Dictionary<GDSemanticType, List<GDTypeOrigin>>(_origins.Count);
+            foreach (var kv in _origins)
+            {
+                if (kv.Key == null || kv.Key.IsVariant)
+                    continue;
+
+                clone.Types.Add(kv.Key);
+                foreach (var origin in kv.Value)
+                {
+                    if (origin.Confidence == GDTypeOriginConfidence.DuckTyped || origin.Confidence == GDTypeOriginConfidence.Heuristic)
+                        clone.AllHighConfidence = false;
+                }
+                origins[kv.Key] = new List<GDTypeOrigin>(kv.Value);
+            }
+            if (origins.Count > 0)
+                clone._origins = origins;
+        }
+
+        foreach (var t in Types)
+            clone.Types.Add(t);
+
+        return clone;
     }
 
     /// <summary>
@@ -458,6 +499,18 @@ public class GDUnionType
             target._origins[type] = list;
         }
 
+        var seen = OriginSet(target, type, list);
+
+        foreach (var origin in origins)
+        {
+            if (seen.Add(origin))
+                list.Add(origin);
+        }
+    }
+
+    /// <summary>The membership index of <paramref name="list"/> (the origins of <paramref name="type"/>), built on first use.</summary>
+    private static HashSet<GDTypeOrigin> OriginSet(GDUnionType target, GDSemanticType type, List<GDTypeOrigin> list)
+    {
         target._originSets ??= new Dictionary<GDSemanticType, HashSet<GDTypeOrigin>>();
         if (!target._originSets.TryGetValue(type, out var seen))
         {
@@ -465,12 +518,7 @@ public class GDUnionType
             seen = new HashSet<GDTypeOrigin>(list);
             target._originSets[type] = seen;
         }
-
-        foreach (var origin in origins)
-        {
-            if (seen.Add(origin))
-                list.Add(origin);
-        }
+        return seen;
     }
 
     private static bool IsNumericType(string type) =>

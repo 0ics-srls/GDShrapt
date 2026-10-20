@@ -43,6 +43,9 @@ public class GDGodotTypesProvider : IGDRuntimeProvider
 
     private void BuildTypeCache()
     {
+        _buildTypeInfo = BuildTypeInfo;
+        _buildMember = key => GetMemberInternal(key.Type, key.Member, new HashSet<string>());
+
         if (_assemblyData?.TypeDatas == null)
             return;
 
@@ -125,13 +128,19 @@ public class GDGodotTypesProvider : IGDRuntimeProvider
     // Godot types are immutable: each type's info is built once (rebuilding the member list on every call
     // cost ~12 s CPU on an 1800-script project, LSAI#48).
     private readonly ConcurrentDictionary<string, GDRuntimeTypeInfo?> _typeInfoCache = new();
+    private Func<string, GDRuntimeTypeInfo?> _buildTypeInfo = null!;
+
+    // Same for member lookups: each GetMember built a visited-set and a fresh member info (with its parameter
+    // list) per call. Member infos are never mutated after construction.
+    private readonly ConcurrentDictionary<(string Type, string Member), GDRuntimeMemberInfo?> _memberCache = new();
+    private Func<(string Type, string Member), GDRuntimeMemberInfo?> _buildMember = null!;
 
     public GDRuntimeTypeInfo? GetTypeInfo(string typeName)
     {
         if (string.IsNullOrEmpty(typeName))
             return null;
 
-        return _typeInfoCache.GetOrAdd(typeName, BuildTypeInfo);
+        return _typeInfoCache.GetOrAdd(typeName, _buildTypeInfo);
     }
 
     private GDRuntimeTypeInfo? BuildTypeInfo(string typeName)
@@ -256,7 +265,10 @@ public class GDGodotTypesProvider : IGDRuntimeProvider
 
     public GDRuntimeMemberInfo? GetMember(string typeName, string memberName)
     {
-        return GetMemberInternal(typeName, memberName, new HashSet<string>());
+        if (string.IsNullOrEmpty(typeName) || string.IsNullOrEmpty(memberName))
+            return null;
+
+        return _memberCache.GetOrAdd((typeName, memberName), _buildMember);
     }
 
     private GDRuntimeMemberInfo? GetMemberInternal(string typeName, string memberName, HashSet<string> visited)

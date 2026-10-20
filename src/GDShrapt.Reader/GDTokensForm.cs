@@ -1023,8 +1023,12 @@ namespace GDShrapt.Reader
         // Freeze mechanism for thread-safe iteration
         protected bool _isFrozen;
         protected GDSyntaxToken[] _frozenSnapshot;
-        protected GDSyntaxToken[] _frozenSnapshotReversed;
-        protected Dictionary<GDSyntaxToken, int> _frozenTokenIndex;
+        private GDSyntaxToken[] _frozenSnapshotReversed;
+        private Dictionary<GDSyntaxToken, int> _frozenTokenIndex;
+
+        // Forms up to this size answer index lookups with a linear scan; a dictionary per form (one per AST
+        // node) was most of Freeze()'s allocations (LSAI#48).
+        private const int FrozenIndexDictionaryThreshold = 16;
 
         public int Count => _list.Count;
         public bool IsReadOnly => false;
@@ -1076,16 +1080,8 @@ namespace GDShrapt.Reader
             if (_isFrozen)
                 return;
 
-            // Create snapshot before freezing
+            // Create snapshot before freezing (the reversed copy and the position index are built on first use)
             _frozenSnapshot = BuildSnapshot();
-            _frozenSnapshotReversed = BuildSnapshotReversed();
-
-            // Build position index for fast O(1) lookup
-            _frozenTokenIndex = new Dictionary<GDSyntaxToken, int>(_frozenSnapshot.Length);
-            for (int i = 0; i < _frozenSnapshot.Length; i++)
-            {
-                _frozenTokenIndex[_frozenSnapshot[i]] = i;
-            }
 
             _isFrozen = true;
 
@@ -1116,29 +1112,82 @@ namespace GDShrapt.Reader
 
         private GDSyntaxToken[] BuildSnapshot()
         {
-            var result = new List<GDSyntaxToken>();
-            var node = _list.First;
-            while (node != null)
+            var count = 0;
+            for (var node = _list.First; node != null; node = node.Next)
             {
                 if (node.Value != null)
-                    result.Add(node.Value);
-                node = node.Next;
+                    count++;
             }
-            return result.ToArray();
+
+            if (count == 0)
+                return Array.Empty<GDSyntaxToken>();
+
+            var result = new GDSyntaxToken[count];
+            var i = 0;
+            for (var node = _list.First; node != null; node = node.Next)
+            {
+                if (node.Value != null)
+                    result[i++] = node.Value;
+            }
+            return result;
         }
 
-        private GDSyntaxToken[] BuildSnapshotReversed()
+        /// <summary>The frozen snapshot in reverse order, built once on first use (thread-safe publication).</summary>
+        private GDSyntaxToken[] FrozenSnapshotReversed
         {
-            var result = new List<GDSyntaxToken>();
-            var node = _list.Last;
-            while (node != null)
+            get
             {
-                if (node.Value != null)
-                    result.Add(node.Value);
-                node = node.Previous;
+                var reversed = System.Threading.Volatile.Read(ref _frozenSnapshotReversed);
+                if (reversed != null)
+                    return reversed;
+
+                if (_frozenSnapshot.Length == 0)
+                    reversed = _frozenSnapshot;
+                else
+                {
+                    reversed = (GDSyntaxToken[])_frozenSnapshot.Clone();
+                    Array.Reverse(reversed);
+                }
+                return System.Threading.Interlocked.CompareExchange(ref _frozenSnapshotReversed, reversed, null) ?? reversed;
             }
-            return result.ToArray();
         }
+
+        /// <summary>
+        /// Position of <paramref name="token"/> in the frozen snapshot. Equal tokens resolve to the last one, as a
+        /// dictionary filled in snapshot order would.
+        /// </summary>
+        private bool TryGetFrozenIndex(GDSyntaxToken token, out int index)
+        {
+            var snapshot = _frozenSnapshot;
+            if (snapshot.Length <= FrozenIndexDictionaryThreshold)
+            {
+                for (var i = snapshot.Length - 1; i >= 0; i--)
+                {
+                    if (EqualityComparer<GDSyntaxToken>.Default.Equals(snapshot[i], token))
+                    {
+                        index = i;
+                        return true;
+                    }
+                }
+                index = -1;
+                return false;
+            }
+
+            var map = System.Threading.Volatile.Read(ref _frozenTokenIndex);
+            if (map == null)
+            {
+                map = new Dictionary<GDSyntaxToken, int>(snapshot.Length);
+                for (var i = 0; i < snapshot.Length; i++)
+                    map[snapshot[i]] = i;
+                map = System.Threading.Interlocked.CompareExchange(ref _frozenTokenIndex, map, null) ?? map;
+            }
+            return map.TryGetValue(token, out index);
+        }
+
+        protected bool FrozenContains(GDSyntaxToken token) => TryGetFrozenIndex(token, out _);
+
+        /// <summary>The direct tokens of a frozen form (null while mutable), for allocation-free traversal.</summary>
+        internal GDSyntaxToken[] FrozenTokens => _isFrozen ? _frozenSnapshot : null;
 
         protected void ThrowIfFrozen()
         {
@@ -1413,8 +1462,8 @@ namespace GDShrapt.Reader
             if (item is null)
                 throw new System.ArgumentNullException(nameof(item));
 
-            if (_isFrozen && _frozenTokenIndex != null)
-                return _frozenTokenIndex.ContainsKey(item);
+            if (_isFrozen && _frozenSnapshot != null)
+                return FrozenContains(item);
 
             return _list.Contains(item);
         }
@@ -1513,8 +1562,8 @@ namespace GDShrapt.Reader
         public IEnumerable<GDSyntaxToken> Reversed()
         {
             // If frozen - return cached snapshot for thread safety
-            if (_isFrozen && _frozenSnapshotReversed != null)
-                return _frozenSnapshotReversed;
+            if (_isFrozen && _frozenSnapshot != null)
+                return FrozenSnapshotReversed;
 
             return ReversedLazy();
         }
@@ -1536,10 +1585,10 @@ namespace GDShrapt.Reader
 
         public IEnumerable<GDSyntaxToken> GetAllTokensAfter(int statePointIndex)
         {
-            if (_isFrozen && _frozenSnapshot != null && _frozenTokenIndex != null)
+            if (_isFrozen && _frozenSnapshot != null)
             {
                 var token = _statePoints[statePointIndex].Value;
-                if (token != null && _frozenTokenIndex.TryGetValue(token, out int index))
+                if (token != null && TryGetFrozenIndex(token, out int index))
                 {
                     for (int i = index + 1; i < _frozenSnapshot.Length; i++)
                         yield return _frozenSnapshot[i];
@@ -1560,9 +1609,9 @@ namespace GDShrapt.Reader
 
         public IEnumerable<GDSyntaxToken> GetAllTokensAfter(GDSyntaxToken token)
         {
-            if (_isFrozen && _frozenTokenIndex != null && _frozenSnapshot != null)
+            if (_isFrozen && _frozenSnapshot != null)
             {
-                if (_frozenTokenIndex.TryGetValue(token, out int index))
+                if (TryGetFrozenIndex(token, out int index))
                 {
                     for (int i = index + 1; i < _frozenSnapshot.Length; i++)
                         yield return _frozenSnapshot[i];
@@ -1586,10 +1635,10 @@ namespace GDShrapt.Reader
 
         public IEnumerable<GDSyntaxToken> GetTokensBefore(int statePointIndex)
         {
-            if (_isFrozen && _frozenSnapshot != null && _frozenTokenIndex != null)
+            if (_isFrozen && _frozenSnapshot != null)
             {
                 var token = _statePoints[statePointIndex].Value;
-                if (token != null && _frozenTokenIndex.TryGetValue(token, out int index))
+                if (token != null && TryGetFrozenIndex(token, out int index))
                 {
                     for (int i = index - 1; i >= 0; i--)
                         yield return _frozenSnapshot[i];
@@ -1610,9 +1659,9 @@ namespace GDShrapt.Reader
 
         public IEnumerable<GDSyntaxToken> GetTokensBefore(GDSyntaxToken token)
         {
-            if (_isFrozen && _frozenTokenIndex != null && _frozenSnapshot != null)
+            if (_isFrozen && _frozenSnapshot != null)
             {
-                if (_frozenTokenIndex.TryGetValue(token, out int index))
+                if (TryGetFrozenIndex(token, out int index))
                 {
                     for (int i = index - 1; i >= 0; i--)
                         yield return _frozenSnapshot[i];
@@ -1692,9 +1741,9 @@ namespace GDShrapt.Reader
         public T PreviousBefore<T>(GDSyntaxToken token)
             where T : GDSyntaxToken
         {
-            if (_isFrozen && _frozenTokenIndex != null && _frozenSnapshot != null)
+            if (_isFrozen && _frozenSnapshot != null)
             {
-                if (_frozenTokenIndex.TryGetValue(token, out int index))
+                if (TryGetFrozenIndex(token, out int index))
                 {
                     for (int i = index - 1; i >= 0; i--)
                     {
@@ -1723,9 +1772,9 @@ namespace GDShrapt.Reader
 
         public GDSyntaxToken PreviousTokenBefore(GDSyntaxToken token)
         {
-            if (_isFrozen && _frozenTokenIndex != null && _frozenSnapshot != null)
+            if (_isFrozen && _frozenSnapshot != null)
             {
-                if (_frozenTokenIndex.TryGetValue(token, out int index))
+                if (TryGetFrozenIndex(token, out int index))
                 {
                     if (index - 1 >= 0)
                         return _frozenSnapshot[index - 1];
@@ -1751,9 +1800,9 @@ namespace GDShrapt.Reader
 
         public GDSyntaxToken NextTokenAfter(GDSyntaxToken token)
         {
-            if (_isFrozen && _frozenTokenIndex != null && _frozenSnapshot != null)
+            if (_isFrozen && _frozenSnapshot != null)
             {
-                if (_frozenTokenIndex.TryGetValue(token, out int index))
+                if (TryGetFrozenIndex(token, out int index))
                 {
                     if (index + 1 < _frozenSnapshot.Length)
                         return _frozenSnapshot[index + 1];
@@ -1780,9 +1829,9 @@ namespace GDShrapt.Reader
         public T NextAfter<T>(GDSyntaxToken token)
             where T : GDSyntaxToken
         {
-            if (_isFrozen && _frozenTokenIndex != null && _frozenSnapshot != null)
+            if (_isFrozen && _frozenSnapshot != null)
             {
-                if (_frozenTokenIndex.TryGetValue(token, out int index))
+                if (TryGetFrozenIndex(token, out int index))
                 {
                     for (int i = index + 1; i < _frozenSnapshot.Length; i++)
                     {
@@ -1842,9 +1891,9 @@ namespace GDShrapt.Reader
         {
             get
             {
-                if (_isFrozen && _frozenSnapshotReversed != null)
+                if (_isFrozen && _frozenSnapshot != null)
                 {
-                    return _frozenSnapshotReversed.Length > 0 ? _frozenSnapshotReversed[0] : null;
+                    return _frozenSnapshot.Length > 0 ? _frozenSnapshot[_frozenSnapshot.Length - 1] : null;
                 }
 
                 var node = _list.Last;
@@ -1906,10 +1955,11 @@ namespace GDShrapt.Reader
         private T FindLast<T>()
             where T : GDSyntaxToken
         {
-            if (_isFrozen && _frozenSnapshotReversed != null)
+            if (_isFrozen && _frozenSnapshot != null)
             {
-                foreach (var token in _frozenSnapshotReversed)
+                for (var i = _frozenSnapshot.Length - 1; i >= 0; i--)
                 {
+                    var token = _frozenSnapshot[i];
                     if (token is T result)
                         return result;
                 }

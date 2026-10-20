@@ -54,6 +54,20 @@ public class GDFlowVariableType
     private List<GDNarrowingConstraint>? _activeNarrowings;
     private List<GDEscapePoint>? _escapePoints;
 
+    // Copy-on-write: Clone() shares the three lists with the copy; whichever side mutates first copies its own.
+    // Flow states are cloned at every branch/statement but rarely mutated afterwards (LSAI#48).
+    private bool _listsShared;
+
+    private void UnshareLists()
+    {
+        if (!_listsShared)
+            return;
+        _listsShared = false;
+        if (_assignmentHistory != null) _assignmentHistory = new List<GDFlowAssignmentRecord>(_assignmentHistory);
+        if (_activeNarrowings != null) _activeNarrowings = new List<GDNarrowingConstraint>(_activeNarrowings);
+        if (_escapePoints != null) _escapePoints = new List<GDEscapePoint>(_escapePoints);
+    }
+
     /// <summary>
     /// Complete assignment history for this variable. Unlike CurrentType (which is SSA-replaced
     /// on each assignment), this list accumulates ALL assignments across the variable's lifetime.
@@ -67,6 +81,7 @@ public class GDFlowVariableType
     /// </summary>
     public void RecordAssignment(GDSemanticType type, GDTypeOriginKind kind, GDTypeOriginConfidence confidence, int line, int column)
     {
+        UnshareLists();
         _assignmentHistory ??= new List<GDFlowAssignmentRecord>();
         _assignmentHistory.Add(new GDFlowAssignmentRecord(type, kind, confidence, line, column));
     }
@@ -85,6 +100,7 @@ public class GDFlowVariableType
 
     public void AddNarrowing(GDNarrowingConstraint narrowing)
     {
+        UnshareLists();
         if (_activeNarrowings == null)
             _activeNarrowings = new List<GDNarrowingConstraint>();
         _activeNarrowings.Add(narrowing);
@@ -92,11 +108,13 @@ public class GDFlowVariableType
 
     public void ClearNarrowings()
     {
+        UnshareLists();
         _activeNarrowings?.Clear();
     }
 
     public void AddEscapePoint(GDEscapePoint escape)
     {
+        UnshareLists();
         if (_escapePoints == null)
             _escapePoints = new List<GDEscapePoint>();
         _escapePoints.Add(escape);
@@ -191,19 +209,25 @@ public class GDFlowVariableType
     /// <summary>
     /// Creates a copy of this flow type.
     /// </summary>
-    public GDFlowVariableType Clone() => new()
+    public GDFlowVariableType Clone()
     {
-        CurrentType = CloneUnion(CurrentType),
-        DeclaredType = DeclaredType,
-        IsNarrowed = IsNarrowed,
-        NarrowedFromType = NarrowedFromType,
-        IsGuaranteedNonNull = IsGuaranteedNonNull,
-        IsPotentiallyNull = IsPotentiallyNull,
-        DuckType = DuckType != null ? CloneDuckType(DuckType) : null,
-        _assignmentHistory = _assignmentHistory != null ? new List<GDFlowAssignmentRecord>(_assignmentHistory) : null,
-        _activeNarrowings = _activeNarrowings != null ? new List<GDNarrowingConstraint>(_activeNarrowings) : null,
-        _escapePoints = _escapePoints != null ? new List<GDEscapePoint>(_escapePoints) : null
-    };
+        var shared = _assignmentHistory != null || _activeNarrowings != null || _escapePoints != null;
+        _listsShared |= shared;
+        return new GDFlowVariableType
+        {
+            CurrentType = CloneUnion(CurrentType),
+            DeclaredType = DeclaredType,
+            IsNarrowed = IsNarrowed,
+            NarrowedFromType = NarrowedFromType,
+            IsGuaranteedNonNull = IsGuaranteedNonNull,
+            IsPotentiallyNull = IsPotentiallyNull,
+            DuckType = DuckType != null ? CloneDuckType(DuckType) : null,
+            _assignmentHistory = _assignmentHistory,
+            _activeNarrowings = _activeNarrowings,
+            _escapePoints = _escapePoints,
+            _listsShared = shared
+        };
+    }
 
     private static GDDuckType CloneDuckType(GDDuckType original)
     {
@@ -221,33 +245,7 @@ public class GDFlowVariableType
         return clone;
     }
 
-    private static GDUnionType CloneUnion(GDUnionType original)
-    {
-        var clone = new GDUnionType
-        {
-            AllHighConfidence = original.AllHighConfidence,
-            CommonBaseType = original.CommonBaseType,
-            ConfidenceReason = original.ConfidenceReason
-        };
-
-        if (original.HasOrigins)
-        {
-            // Use AddType(type, origin) which adds both type and origin
-            foreach (var tracked in original.AllTrackedTypes)
-                clone.AddType(tracked.Type, tracked.Origin);
-
-            // Also add any types that have no origins
-            foreach (var t in original.Types)
-                clone.Types.Add(t); // HashSet.Add is idempotent
-        }
-        else
-        {
-            foreach (var t in original.Types)
-                clone.Types.Add(t);
-        }
-
-        return clone;
-    }
+    private static GDUnionType CloneUnion(GDUnionType original) => original.CloneUnion();
 
     public override string ToString()
     {

@@ -570,7 +570,14 @@ public class GDScriptProject : IGDScriptProvider, IDisposable
     /// </summary>
     public GDScriptFile? GetScriptByTypeName(string typeName)
     {
-        return _scripts.Values.FirstOrDefault(x => x.TypeName == typeName);
+        // Enumerate the dictionary itself: ConcurrentDictionary.Values copies every script into a new list on
+        // each call, and this runs once per inferred method (LSAI#48).
+        foreach (var entry in _scripts)
+        {
+            if (entry.Value.TypeName == typeName)
+                return entry.Value;
+        }
+        return null;
     }
 
     /// <summary>
@@ -588,7 +595,12 @@ public class GDScriptProject : IGDScriptProvider, IDisposable
     public GDScriptFile? GetScriptByClass(GDClassDeclaration classDecl)
     {
         if (classDecl == null) return null;
-        return _scripts.Values.FirstOrDefault(x => x.Class == classDecl);
+        foreach (var entry in _scripts)
+        {
+            if (entry.Value.Class == classDecl)
+                return entry.Value;
+        }
+        return null;
     }
 
     internal GDProjectTypesProvider GetOrCreateProjectTypesProvider()

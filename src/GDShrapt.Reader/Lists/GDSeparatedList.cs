@@ -91,16 +91,32 @@ namespace GDShrapt.Reader
             Visit(visitor);
             visitor.EnterNode(this);
 
-            foreach (var node in walkBackward ? NodesReversed : Nodes)
+            var tokens = Form.FrozenTokens;
+            if (tokens != null)
             {
-                visitor.EnterListChild(node);
-                node.WalkIn(visitor, walkBackward);
-                visitor.LeftListChild(node);
+                // Allocation-free over a frozen tree (see GDNode.WalkIn)
+                for (var k = 0; k < tokens.Length; k++)
+                {
+                    if (tokens[walkBackward ? tokens.Length - 1 - k : k] is GDNode node)
+                        WalkListChild(visitor, node, walkBackward);
+                }
+            }
+            else
+            {
+                foreach (var node in walkBackward ? NodesReversed : Nodes)
+                    WalkListChild(visitor, node, walkBackward);
             }
 
             visitor.LeftNode();
             Left(visitor);
             visitor.DidLeft(this);
+        }
+
+        private static void WalkListChild(IGDVisitor visitor, GDNode node, bool walkBackward)
+        {
+            visitor.EnterListChild(node);
+            node.WalkIn(visitor, walkBackward);
+            visitor.LeftListChild(node);
         }
     }
 }

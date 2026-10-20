@@ -532,8 +532,33 @@ namespace GDShrapt.Reader
             Visit(visitor);
             visitor.EnterNode(this);
 
-            foreach (var node in walkBackward ? NodesReversed : Nodes)
-                node.WalkIn(visitor, walkBackward);
+            // A frozen tree is walked over its token arrays: Nodes/NodesReversed allocate two iterators per visited
+            // node, the largest allocation source of a project analysis (LSAI#48).
+            var tokens = Form.FrozenTokens;
+            if (tokens != null)
+            {
+                if (walkBackward)
+                {
+                    for (var i = tokens.Length - 1; i >= 0; i--)
+                    {
+                        if (tokens[i] is GDNode node)
+                            node.WalkIn(visitor, walkBackward);
+                    }
+                }
+                else
+                {
+                    for (var i = 0; i < tokens.Length; i++)
+                    {
+                        if (tokens[i] is GDNode node)
+                            node.WalkIn(visitor, walkBackward);
+                    }
+                }
+            }
+            else
+            {
+                foreach (var node in walkBackward ? NodesReversed : Nodes)
+                    node.WalkIn(visitor, walkBackward);
+            }
 
             visitor.LeftNode();
             Left(visitor);
