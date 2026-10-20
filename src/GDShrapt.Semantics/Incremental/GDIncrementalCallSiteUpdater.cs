@@ -207,12 +207,40 @@ namespace GDShrapt.Semantics
         }
 
         /// <summary>
+        /// Initial build: the call-site entries of every method of <paramref name="file"/>, in method order.
+        /// Reads only (no registry, no lock), so several files can be collected in parallel; the caller
+        /// registers the entries in file order (LSAI#48).
+        /// </summary>
+        internal List<GDCallSiteEntry> CollectInitialCallSites(GDScriptFile file)
+        {
+            var entries = new List<GDCallSiteEntry>();
+            if (file.FullPath == null || file.Class == null)
+                return entries;
+
+            foreach (var method in FindChangedMethods(null, file.Class).Added)
+                CollectMethodCallSites(file, method, entries);
+
+            return entries;
+        }
+
+        /// <summary>
         /// Registers call sites for a method.
         /// </summary>
         private void RegisterMethodCallSites(
             GDCallSiteRegistry registry,
             GDScriptFile file,
             GDMethodDeclaration method)
+        {
+            var entries = new List<GDCallSiteEntry>();
+            CollectMethodCallSites(file, method, entries);
+            foreach (var entry in entries)
+                registry.Register(entry);
+        }
+
+        private void CollectMethodCallSites(
+            GDScriptFile file,
+            GDMethodDeclaration method,
+            List<GDCallSiteEntry> entries)
         {
             if (file.FullPath == null)
                 return;
@@ -222,6 +250,7 @@ namespace GDShrapt.Semantics
             // Find all call expressions in the method body
             var methodIndex = GDAstNodeIndex.Build(method, typeof(GDCallExpression), typeof(GDVariableDeclarationStatement));
             var callExpressions = methodIndex.GetNodes<GDCallExpression>();
+            var localDeclarations = methodIndex.GetNodes<GDVariableDeclarationStatement>();
 
             foreach (var call in callExpressions)
             {
@@ -230,7 +259,7 @@ namespace GDShrapt.Semantics
                 if (string.IsNullOrEmpty(calledName))
                     continue;
 
-                var (targetClassName, confidence, isDuckTyped) = InferTargetClass(call, file, method);
+                var (targetClassName, confidence, isDuckTyped) = InferTargetClass(call, file, method, localDeclarations);
 
                 if (string.IsNullOrEmpty(targetClassName))
                     continue;
@@ -251,7 +280,7 @@ namespace GDShrapt.Semantics
                     confidence: confidence,
                     isDuckTyped: isDuckTyped);
 
-                registry.Register(entry);
+                entries.Add(entry);
             }
         }
 
@@ -274,7 +303,8 @@ namespace GDShrapt.Semantics
         private (string? ClassName, GDReferenceConfidence Confidence, bool IsDuckTyped) InferTargetClass(
             GDCallExpression call,
             GDScriptFile file,
-            GDMethodDeclaration method)
+            GDMethodDeclaration method,
+            IReadOnlyList<GDVariableDeclarationStatement> localDeclarations)
         {
             var callee = call.CallerExpression;
 
@@ -314,7 +344,7 @@ namespace GDShrapt.Semantics
                     }
 
                     // Try to resolve receiver type from parameter declarations
-                    var paramType = ResolveIdentifierType(receiverName, method, file);
+                    var paramType = ResolveIdentifierType(receiverName, method, file, localDeclarations);
                     if (!string.IsNullOrEmpty(paramType))
                         return (paramType, GDReferenceConfidence.Strict, false);
                 }
@@ -337,7 +367,8 @@ namespace GDShrapt.Semantics
         private string ResolveIdentifierType(
             string identifierName,
             GDMethodDeclaration method,
-            GDScriptFile file)
+            GDScriptFile file,
+            IReadOnlyList<GDVariableDeclarationStatement> localDeclarations)
         {
             if (string.IsNullOrEmpty(identifierName))
                 return null;
@@ -356,9 +387,9 @@ namespace GDShrapt.Semantics
                 }
             }
 
-            // Check local variable declarations (var x: Type) in the method body
-            var resolveIndex = GDAstNodeIndex.Build(method, typeof(GDVariableDeclarationStatement));
-            foreach (var varDecl in resolveIndex.GetNodes<GDVariableDeclarationStatement>())
+            // Check local variable declarations (var x: Type) in the method body (indexed once per method by the
+            // caller, instead of re-walking the method for every member call)
+            foreach (var varDecl in localDeclarations)
             {
                 if (varDecl.Identifier?.Sequence == identifierName && varDecl.Type != null)
                 {

@@ -265,7 +265,7 @@ public class GDScriptProject : IGDScriptProvider, IDisposable
 
         // Read + parse are independent per file (the reader keeps its state per call), and they dominate
         // project load: parse in parallel (LSAI#48).
-        Parallel.ForEach(loaded, script => script.Reload());
+        Parallel.ForEach(Partitioner.Create(loaded, loadBalance: true), script => script.Reload());
 
         _logger.Debug($"Project loaded: {_scripts.Count} scripts");
         _projectTypesDirty = true;
@@ -347,7 +347,10 @@ public class GDScriptProject : IGDScriptProvider, IDisposable
 
         try
         {
-            Parallel.ForEach(_scripts.Values, options, script =>
+            // Largest scripts first over a load-balancing partitioner: the default range partitioning of a list
+            // hands contiguous chunks to each worker, so a few large files left one core finishing alone (LSAI#48).
+            var ordered = _scripts.Values.OrderByDescending(s => s.LastContent?.Length ?? 0).ToArray();
+            Parallel.ForEach(Partitioner.Create(ordered, loadBalance: true), options, script =>
             {
                 try
                 {
@@ -754,21 +757,17 @@ public class GDScriptProject : IGDScriptProvider, IDisposable
 
         var updater = new GDIncrementalCallSiteUpdater(CreateRuntimeProvider());
 
-        foreach (var scriptFile in _scripts.Values)
+        // Collect each file's call sites in parallel (read-only), register them sequentially in file order:
+        // the same registry content as the former one-file-at-a-time build (LSAI#48).
+        var files = _scripts.Values.Where(f => f.Class != null && f.FullPath != null).ToList();
+        var collected = new List<GDCallSiteEntry>[files.Count];
+        Parallel.For(0, files.Count, new ParallelOptions { CancellationToken = cancellationToken },
+            i => collected[i] = updater.CollectInitialCallSites(files[i]));
+
+        foreach (var entries in collected)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            if (scriptFile.Class == null || scriptFile.FullPath == null)
-                continue;
-
-            // Register all call sites from this file
-            updater.UpdateSemanticModel(
-                this,
-                scriptFile.FullPath,
-                null,  // No old tree (initial build)
-                scriptFile.Class,
-                Array.Empty<GDTextChange>(),
-                cancellationToken);
+            foreach (var entry in entries)
+                _callSiteRegistry.Register(entry);
         }
 
         _logger.Debug($"Call site registry built: {_callSiteRegistry.Count} entries");

@@ -46,7 +46,7 @@ namespace GDShrapt.Reader
 
         public static GDAstNodeIndex Build(GDNode root, params Type[] typesToIndex)
         {
-            var collector = new GDAstNodeIndexCollector(typesToIndex);
+            var collector = new GDAstNodeIndexCollector(typesToIndex, root._subtreeNodeCountHint);
             root.WalkIn(collector);
             return new GDAstNodeIndex(collector.NodesByType, collector.AllNodes);
         }
