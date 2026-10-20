@@ -26,6 +26,7 @@ public class GDCSharpInteropIndex
         {
             _csharpScriptPaths = project.FileSystem
                 .GetFiles(project.ProjectPath, "*.cs", true)
+                .Where(path => GDGodotProjectFiles.BelongsToProject(project.FileSystem, project.ProjectPath, path))
                 .ToList();
         }
         catch

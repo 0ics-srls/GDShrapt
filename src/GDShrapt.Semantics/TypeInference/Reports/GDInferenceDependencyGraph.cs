@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -66,8 +67,18 @@ internal class GDInferenceDependencyGraph
     {
         var graph = new GDInferenceDependencyGraph();
 
-        // Build nodes
+        // Build nodes. Degrees are counted in one pass over the dependencies (scanning all of them per method
+        // was O(methods x dependencies): ~24 s single-threaded on a 1800-script project, LSAI#48).
         var allDeps = detector.GetAllDependencies().ToList();
+        var outDegree = new Dictionary<string, int>(StringComparer.Ordinal);
+        var inDegree = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var d in allDeps)
+        {
+            outDegree[d.FromMethod] = outDegree.TryGetValue(d.FromMethod, out var o) ? o + 1 : 1;
+            inDegree[d.ToMethod] = inDegree.TryGetValue(d.ToMethod, out var i) ? i + 1 : 1;
+        }
+
+        // Same node order as before: every FromMethod in dependency order, then the remaining ToMethods.
         var allMethods = allDeps.Select(d => d.FromMethod)
             .Concat(allDeps.Select(d => d.ToMethod))
             .Distinct()
@@ -75,8 +86,6 @@ internal class GDInferenceDependencyGraph
 
         foreach (var methodKey in allMethods)
         {
-            var outDeps = allDeps.Where(d => d.FromMethod == methodKey).ToList();
-            var inDeps = allDeps.Where(d => d.ToMethod == methodKey).ToList();
 
             var parts = methodKey.Split('.');
             var className = parts.Length > 1 ? parts[0] : "";
@@ -88,8 +97,8 @@ internal class GDInferenceDependencyGraph
                 ClassName = className,
                 MethodName = methodName,
                 HasCyclicDependency = detector.IsInCycle(methodKey),
-                InDegree = inDeps.Count,
-                OutDegree = outDeps.Count
+                InDegree = inDegree.TryGetValue(methodKey, out var inCount) ? inCount : 0,
+                OutDegree = outDegree.TryGetValue(methodKey, out var outCount) ? outCount : 0
             });
         }
 

@@ -37,6 +37,8 @@ public class GDUnionType
     public bool IsFrozen { get; private set; }
 
     private Dictionary<GDSemanticType, List<GDTypeOrigin>>? _origins;
+    // membership index of _origins (by reference), kept in step by AddOrigins
+    private Dictionary<GDSemanticType, HashSet<GDTypeOrigin>>? _originSets;
 
     /// <summary>
     /// Whether any origin tracking data is present.
@@ -103,16 +105,7 @@ public class GDUnionType
 
         Types.Add(type);
 
-        if (_origins == null)
-            _origins = new Dictionary<GDSemanticType, List<GDTypeOrigin>>();
-
-        if (!_origins.TryGetValue(type, out var list))
-        {
-            list = new List<GDTypeOrigin>();
-            _origins[type] = list;
-        }
-
-        list.Add(origin);
+        AddOrigins(this, type, [origin]);
 
         if (origin.Confidence == GDTypeOriginConfidence.DuckTyped || origin.Confidence == GDTypeOriginConfidence.Heuristic)
             AllHighConfidence = false;
@@ -147,19 +140,8 @@ public class GDUnionType
 
         if (other._origins != null)
         {
-            if (_origins == null)
-                _origins = new Dictionary<GDSemanticType, List<GDTypeOrigin>>();
-
             foreach (var kv in other._origins)
-            {
-                if (!_origins.TryGetValue(kv.Key, out var list))
-                {
-                    list = new List<GDTypeOrigin>();
-                    _origins[kv.Key] = list;
-                }
-
-                list.AddRange(kv.Value);
-            }
+                AddOrigins(this, kv.Key, kv.Value);
         }
     }
 
@@ -321,8 +303,15 @@ public class GDUnionType
             return;
 
         var idx = list.IndexOf(oldOrigin);
-        if (idx >= 0)
+        if (idx < 0)
+            return;
+
+        var seen = _originSets![type];
+        seen.Remove(oldOrigin);
+        if (seen.Add(newOrigin))
             list[idx] = newOrigin;
+        else
+            list.RemoveAt(idx); // newOrigin is already tracked: keep it once
     }
 
     /// <summary>
@@ -442,18 +431,8 @@ public class GDUnionType
         if (source._origins == null)
             return;
 
-        if (target._origins == null)
-            target._origins = new Dictionary<GDSemanticType, List<GDTypeOrigin>>();
-
         foreach (var kv in source._origins)
-        {
-            if (!target._origins.TryGetValue(kv.Key, out var list))
-            {
-                list = new List<GDTypeOrigin>();
-                target._origins[kv.Key] = list;
-            }
-            list.AddRange(kv.Value);
-        }
+            AddOrigins(target, kv.Key, kv.Value);
     }
 
     private static void CopyOriginsForType(GDUnionType source, GDSemanticType sourceType, GDUnionType target, GDSemanticType? targetType = null)
@@ -461,17 +440,37 @@ public class GDUnionType
         if (source._origins == null || !source._origins.TryGetValue(sourceType, out var sourceOrigins))
             return;
 
-        var key = targetType ?? sourceType;
+        AddOrigins(target, targetType ?? sourceType, sourceOrigins);
+    }
 
-        if (target._origins == null)
-            target._origins = new Dictionary<GDSemanticType, List<GDTypeOrigin>>();
-
-        if (!target._origins.TryGetValue(key, out var list))
+    /// <summary>
+    /// The only writer of <see cref="_origins"/>: appends each origin once. Origins are immutable and
+    /// shared by reference between the branch states of a flow merge, so two branches cloned from the
+    /// same parent carry the same instances — appending them blindly doubled the list at every merge
+    /// (2^k origins after k if/loop merges; LSAI#48).
+    /// </summary>
+    private static void AddOrigins(GDUnionType target, GDSemanticType type, IEnumerable<GDTypeOrigin> origins)
+    {
+        target._origins ??= new Dictionary<GDSemanticType, List<GDTypeOrigin>>();
+        if (!target._origins.TryGetValue(type, out var list))
         {
             list = new List<GDTypeOrigin>();
-            target._origins[key] = list;
+            target._origins[type] = list;
         }
-        list.AddRange(sourceOrigins);
+
+        target._originSets ??= new Dictionary<GDSemanticType, HashSet<GDTypeOrigin>>();
+        if (!target._originSets.TryGetValue(type, out var seen))
+        {
+            // GDTypeOrigin does not override Equals/GetHashCode: the default comparer is by reference.
+            seen = new HashSet<GDTypeOrigin>(list);
+            target._originSets[type] = seen;
+        }
+
+        foreach (var origin in origins)
+        {
+            if (seen.Add(origin))
+                list.Add(origin);
+        }
     }
 
     private static bool IsNumericType(string type) =>

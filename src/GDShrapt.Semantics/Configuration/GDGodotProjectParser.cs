@@ -231,7 +231,7 @@ public static class GDGodotProjectParser
         try
         {
             // 1. Scan .uid sidecar files (Godot 4.4+)
-            foreach (var uidFile in fs.GetFiles(projectDir, "*.uid", true))
+            foreach (var uidFile in GDGodotProjectFiles.Enumerate(fs, projectDir, "*.uid"))
             {
                 if (neededUids.Count == 0)
                     break;
@@ -261,11 +261,11 @@ public static class GDGodotProjectParser
             if (neededUids.Count > 0)
             {
                 IEnumerable<string> sceneFiles;
-                try { sceneFiles = fs.GetFiles(projectDir, "*.tscn", true); }
+                try { sceneFiles = GDGodotProjectFiles.Enumerate(fs, projectDir, "*.tscn"); }
                 catch (Exception ex) { logger.Debug($"Failed to enumerate .tscn files: {ex.Message}"); sceneFiles = Enumerable.Empty<string>(); }
 
                 IEnumerable<string> resFiles;
-                try { resFiles = fs.GetFiles(projectDir, "*.tres", true); }
+                try { resFiles = GDGodotProjectFiles.Enumerate(fs, projectDir, "*.tres"); }
                 catch (Exception ex) { logger.Debug($"Failed to enumerate .tres files: {ex.Message}"); resFiles = Enumerable.Empty<string>(); }
 
                 foreach (var file in sceneFiles.Concat(resFiles))

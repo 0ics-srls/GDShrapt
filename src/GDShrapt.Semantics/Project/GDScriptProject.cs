@@ -248,7 +248,9 @@ public class GDScriptProject : IGDScriptProvider, IDisposable
             return;
         }
 
-        var allScripts = _fileSystem.GetFiles(_context.ProjectPath, "*.gd", recursive: true);
+        // Only this project's scripts, as Godot sees them: nested projects (own project.godot), .gdignore'd and
+        // dot-folders are not part of it.
+        var allScripts = GDGodotProjectFiles.Enumerate(_fileSystem, _context.ProjectPath, "*.gd");
 
         foreach (var scriptFile in allScripts)
         {
@@ -833,8 +835,12 @@ public class GDScriptProject : IGDScriptProvider, IDisposable
         }
     }
 
+    private bool InProject(string path) => GDGodotProjectFiles.BelongsToProject(_fileSystem, _context.ProjectPath, path);
+
     private void OnFileChanged(object sender, FileSystemEventArgs e)
     {
+        if (!InProject(e.FullPath))
+            return;
         var reference = new GDScriptReference(e.FullPath, _context);
         if (_scripts.TryGetValue(reference, out var script))
         {
@@ -888,6 +894,8 @@ public class GDScriptProject : IGDScriptProvider, IDisposable
 
     private void OnFileCreated(object sender, FileSystemEventArgs e)
     {
+        if (!InProject(e.FullPath))
+            return;
         var reference = new GDScriptReference(e.FullPath, _context);
         var script = CreateScriptFile(reference);
         if (_scripts.TryAdd(reference, script))
@@ -930,6 +938,20 @@ public class GDScriptProject : IGDScriptProvider, IDisposable
 
     private void OnFileRenamed(object sender, RenamedEventArgs e)
     {
+        var oldInProject = InProject(e.OldFullPath);
+        var newInProject = InProject(e.FullPath);
+        if (!newInProject)
+        {
+            // Moved out of the project (e.g. into a nested project): it is gone for this project.
+            if (oldInProject)
+                OnFileDeleted(sender, new FileSystemEventArgs(WatcherChangeTypes.Deleted, Path.GetDirectoryName(e.OldFullPath)!, Path.GetFileName(e.OldFullPath)));
+            return;
+        }
+        if (!oldInProject)
+        {
+            OnFileCreated(sender, new FileSystemEventArgs(WatcherChangeTypes.Created, Path.GetDirectoryName(e.FullPath)!, Path.GetFileName(e.FullPath)));
+            return;
+        }
         var oldReference = new GDScriptReference(e.OldFullPath, _context);
         var newReference = new GDScriptReference(e.FullPath, _context);
 

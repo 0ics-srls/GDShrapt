@@ -1079,7 +1079,7 @@ public class GDSceneTypesProvider : IGDRuntimeProvider, IDisposable
         if (!_fileSystem.DirectoryExists(_projectPath))
             return;
 
-        var sceneFiles = _fileSystem.GetFiles(_projectPath, "*.tscn", recursive: true);
+        var sceneFiles = GDGodotProjectFiles.Enumerate(_fileSystem, _projectPath, "*.tscn");
         foreach (var scenePath in sceneFiles)
         {
             var relativePath = "res://" + scenePath
@@ -1189,8 +1189,12 @@ public class GDSceneTypesProvider : IGDRuntimeProvider, IDisposable
         _logger.Debug($"Refreshed all scene snapshots ({_snapshots.Count} scenes)");
     }
 
+    private bool InProject(string path) => GDGodotProjectFiles.BelongsToProject(_fileSystem, _projectPath, path);
+
     private void OnSceneFileChanged(object sender, FileSystemEventArgs e)
     {
+        if (!InProject(e.FullPath))
+            return;
         if (e.ChangeType != WatcherChangeTypes.Changed)
             return;
 
@@ -1210,6 +1214,8 @@ public class GDSceneTypesProvider : IGDRuntimeProvider, IDisposable
 
     private void OnSceneFileCreated(object sender, FileSystemEventArgs e)
     {
+        if (!InProject(e.FullPath))
+            return;
         _logger.Debug($"Scene created: {e.Name}");
 
         var resourcePath = ToResourcePath(e.FullPath);
@@ -1233,6 +1239,18 @@ public class GDSceneTypesProvider : IGDRuntimeProvider, IDisposable
 
     private void OnSceneFileRenamed(object sender, RenamedEventArgs e)
     {
+        var oldInProject = InProject(e.OldFullPath);
+        if (!InProject(e.FullPath))
+        {
+            if (oldInProject)
+                OnSceneFileDeleted(sender, new FileSystemEventArgs(WatcherChangeTypes.Deleted, Path.GetDirectoryName(e.OldFullPath)!, Path.GetFileName(e.OldFullPath)));
+            return;
+        }
+        if (!oldInProject)
+        {
+            OnSceneFileCreated(sender, new FileSystemEventArgs(WatcherChangeTypes.Created, Path.GetDirectoryName(e.FullPath)!, Path.GetFileName(e.FullPath)));
+            return;
+        }
         _logger.Debug($"Scene renamed: {e.OldName} -> {e.Name}");
 
         var oldResourcePath = ToResourcePath(e.OldFullPath);

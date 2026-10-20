@@ -16,6 +16,13 @@ public class GDProjectTypesProvider : IGDRuntimeProvider
 {
     private readonly IGDScriptProvider _scriptProvider;
     private readonly ConcurrentDictionary<string, GDProjectTypeInfo> _typeCache = new();
+
+    // GetTypeInfo results by project type (the instances _typeCache holds; cleared with it). Only complete
+    // infos are kept — every method's return type explicit or already inferred — so a cached info never
+    // carries a provisional return type. Rebuilding the member list on every call cost ~22 s CPU on an
+    // 1800-script project (LSAI#48).
+    private readonly ConcurrentDictionary<GDProjectTypeInfo, GDRuntimeTypeInfo> _runtimeTypeInfoCache =
+        new(ReferenceEqualityComparer.Instance);
     // Index by script path (for extends "res://path/to/script.gd" support)
     private readonly ConcurrentDictionary<string, string> _pathToTypeName = new(StringComparer.OrdinalIgnoreCase);
     // Index preload const aliases to canonical type names
@@ -48,6 +55,7 @@ public class GDProjectTypesProvider : IGDRuntimeProvider
     public void RebuildCache()
     {
         _typeCache.Clear();
+        _runtimeTypeInfoCache.Clear();
         _pathToTypeName.Clear();
         _preloadAliasToTypeName.Clear();
 
@@ -519,9 +527,12 @@ public class GDProjectTypesProvider : IGDRuntimeProvider
         if (resolvedName == null || !_typeCache.TryGetValue(resolvedName, out var projectType))
             return null;
 
+        if (_runtimeTypeInfoCache.TryGetValue(projectType, out var cached))
+            return cached;
+
         var members = GetAllMembers(projectType);
 
-        return new GDRuntimeTypeInfo(projectType.Name, projectType.BaseTypeName)
+        var info = new GDRuntimeTypeInfo(projectType.Name, projectType.BaseTypeName)
         {
             Members = members,
             IsAbstract = projectType.IsAbstract,
@@ -535,6 +546,10 @@ public class GDProjectTypesProvider : IGDRuntimeProvider
                 TypeName = projectType.Name
             } : null
         };
+
+        if (projectType.Methods.Values.All(m => m.HasExplicitReturnType || m.ReturnTypeInferred))
+            _runtimeTypeInfoCache[projectType] = info;
+        return info;
     }
 
     private List<GDRuntimeMemberInfo> GetAllMembers(GDProjectTypeInfo typeInfo)

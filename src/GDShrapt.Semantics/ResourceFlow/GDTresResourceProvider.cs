@@ -46,7 +46,7 @@ internal class GDTresResourceProvider
         if (!_fileSystem.DirectoryExists(_projectPath))
             return;
 
-        var tresFiles = _fileSystem.GetFiles(_projectPath, "*.tres", recursive: true);
+        var tresFiles = GDGodotProjectFiles.Enumerate(_fileSystem, _projectPath, "*.tres");
 
         foreach (var filePath in tresFiles)
         {
