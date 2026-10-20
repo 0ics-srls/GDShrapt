@@ -352,3 +352,6 @@ MigrationBackup/
 /testproject/GDShrapt.TestProject/.godot
 /testproject/GDShrapt.TestProject/.gdshrapt
 *.uid
+
+# LSAI workspace state (generated)
+.lsai/
