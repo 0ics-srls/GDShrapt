@@ -117,6 +117,7 @@ public class GDCallHierarchyService : GDRefactoringServiceBase
             .GroupBy(c => (c.TargetClassName, c.TargetMethodName))
             .ToList();
 
+        var runtime = _project.CreateRuntimeProvider();
         var result = new List<GDCallHierarchyCallEntry>();
         foreach (var group in grouped)
         {
@@ -128,7 +129,7 @@ public class GDCallHierarchyService : GDRefactoringServiceBase
                 Symbol = targetSymbol ?? new GDCallHierarchySymbol
                 {
                     Name = first.TargetMethodName,
-                    ClassName = first.TargetClassName,
+                    ClassName = DescribeUnresolvedTarget(runtime, first.TargetClassName, first.TargetMethodName),
                     FilePath = filePath,
                     Line = first.Line > 0 ? first.Line - 1 : 0,
                     Column = first.Column > 0 ? first.Column - 1 : 0
@@ -144,6 +145,33 @@ public class GDCallHierarchyService : GDRefactoringServiceBase
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// The class of a callee with no declaration in the project (the item then points at the call site):
+    /// "builtin &lt;Type&gt;" for a Godot type's method (Array[Pylon].size → "builtin Array"), "builtin @GlobalScope"
+    /// for a global function called unqualified (range), else the registry's class ("*" = receiver type unknown).
+    /// LSAI#53: these came back as the caller's class or the raw container type, read as project declarations.
+    /// </summary>
+    private string? DescribeUnresolvedTarget(IGDRuntimeProvider runtime, string? className, string methodName)
+    {
+        if (string.IsNullOrEmpty(className) || className == "*")
+            return className;
+
+        var bracket = className.IndexOf('[');
+        var baseType = bracket > 0 ? className[..bracket] : className;
+
+        // An unqualified call registered on the caller's own class (`range(...)` inside Loadout) that the class
+        // does not declare
+        if (_project.GetScriptByTypeName(baseType) is { } script
+            && script.SemanticModel?.FindSymbol(methodName) is not { Kind: GDSymbolKind.Method }
+            && runtime.GetGlobalFunction(methodName) != null)
+            return "builtin @GlobalScope";
+
+        if (_project.GetScriptByTypeName(baseType) == null && runtime.GetMember(baseType, methodName) != null)
+            return "builtin " + baseType;
+
+        return className;
     }
 
     private GDCallHierarchySymbol? ResolveMethodInFile(string filePath, string? methodName)

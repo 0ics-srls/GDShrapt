@@ -649,6 +649,10 @@ namespace GDShrapt.Reader
                     && Context.RuntimeProvider.GetMember(parentName, memberName) != null)
                     return;
                 var fullName = typeNode.BuildName();
+                // An inner class of another script (GunAssist.Aim) is a type registered by its qualified name,
+                // not a member: "Unknown type: 'GunAssist.Aim'" on a file Godot compiles (LSAI#53)
+                if (!string.IsNullOrEmpty(fullName) && Context.RuntimeProvider.IsKnownType(fullName))
+                    return;
                 if (!string.IsNullOrEmpty(fullName))
                     ReportWarning(GDDiagnosticCode.UnknownType, $"Unknown type: '{fullName}'", reportOn);
                 return;

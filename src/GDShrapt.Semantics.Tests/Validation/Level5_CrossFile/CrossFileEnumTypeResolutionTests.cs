@@ -14,6 +14,48 @@ namespace GDShrapt.Semantics.Tests.Validation.Level5_CrossFile;
 public class CrossFileEnumTypeResolutionTests
 {
     [TestMethod]
+    public void CrossFileInnerClassType_QualifiedName_NoGD3006()
+    {
+        // LSAI#53 (flight-sim II fire_control.gd): `var aim: GunAssist.Aim` -> "Unknown type: 'GunAssist.Aim'".
+        // The inner class is registered as GunAssist.Aim; the check accepted only a member of GunAssist (enums)
+        var gunAssistCode = @"
+class_name GunAssist
+extends RefCounted
+
+class Aim:
+    var lead: float = 0.0
+";
+        var consumerCode = @"
+extends Node
+
+var aim: GunAssist.Aim
+
+func lead_of(a: GunAssist.Aim) -> float:
+    return a.lead
+";
+        var diagnostics = ValidateCrossFile(gunAssistCode, consumerCode);
+        var gd3006 = diagnostics.Where(d => d.Code == GDDiagnosticCode.UnknownType).ToList();
+
+        Assert.AreEqual(0, gd3006.Count,
+            $"GunAssist.Aim should be recognized as a valid type. Found: {FormatDiagnostics(gd3006)}");
+    }
+
+    [TestMethod]
+    public void CrossFileInnerClassType_Missing_IsGD3006()
+    {
+        var gunAssistCode = @"
+class_name GunAssist
+extends RefCounted
+
+class Aim:
+    var lead: float = 0.0
+";
+        var diagnostics = ValidateCrossFile(gunAssistCode, "extends Node\n\nvar aim: GunAssist.Nope\n");
+
+        Assert.AreEqual(1, diagnostics.Count(d => d.Code == GDDiagnosticCode.UnknownType), FormatDiagnostics(diagnostics));
+    }
+
+    [TestMethod]
     public void CrossFileEnumType_QualifiedName_NoGD3006()
     {
         var constantsCode = @"
