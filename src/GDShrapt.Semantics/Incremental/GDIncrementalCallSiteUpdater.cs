@@ -349,6 +349,18 @@ namespace GDShrapt.Semantics
                         return (paramType, GDReferenceConfidence.Strict, false);
                 }
 
+                // self.field: the field's declared type. The model types `self` of a script without class_name by its
+                // path, and the member lookup on that name gives Variant
+                if (receiver is GDMemberOperatorExpression { CallerExpression: GDIdentifierExpression { Identifier.Sequence: "self" } } selfMember
+                    && ResolveIdentifierType(selfMember.Identifier?.Sequence, method, file, localDeclarations) is { Length: > 0 } fieldType)
+                    return (fieldType, GDReferenceConfidence.Strict, false);
+
+                // Any other receiver (c.loadout, me.loadout(), a `:=` local): the type the semantic model infers for
+                // it, as textDocument/references does. Duck-typed it was never a caller of the class (LSAI#53)
+                var inferredType = InferReceiverType(receiver, file);
+                if (!string.IsNullOrEmpty(inferredType))
+                    return (inferredType, GDReferenceConfidence.Strict, false);
+
                 // Fallback: duck-typed call
                 var calledMethodName = GetCalledMethodName(call);
                 if (!string.IsNullOrEmpty(calledMethodName))
@@ -358,6 +370,24 @@ namespace GDShrapt.Semantics
             }
 
             return (null, GDReferenceConfidence.NameMatch, false);
+        }
+
+        /// <summary>
+        /// The receiver's type from the file's semantic model (built by AnalyzeAll before the registry): one class,
+        /// `T|null` counting as T. A union of classes, a container or Variant stays duck-typed.
+        /// </summary>
+        private string? InferReceiverType(GDExpression? receiver, GDScriptFile file)
+        {
+            if (receiver == null || file.CurrentSemanticModel is not { } model)
+                return null;
+
+            var type = model.GetExpressionType(receiver);
+            if (type is GDUnionSemanticType union && union.IsNullable)
+                type = union.WithoutNull();
+
+            return type is GDSimpleSemanticType simple && !simple.IsVariant && !simple.IsArray && !simple.IsDictionary
+                ? NormalizeTypeName(simple.TypeName)
+                : null;
         }
 
         /// <summary>
