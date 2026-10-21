@@ -217,7 +217,10 @@ public class GDFindRefsHandler : IGDFindRefsHandler
                     SignalName = sref.SignalName,
                     IsSceneSignal = sref.IsSceneSignal,
                     ReceiverTypeName = sref.IsSignalConnection ? sref.CallerTypeName : null,
-                    Confidence = sref.IsContractString || sref.IsSignalConnection || isCrossFile || sref.Confidence == GDReferenceConfidence.Union
+                    // Any non-strict confidence travels with the location: a duck-typed reference in an "inherited" group
+                    // lost it and LSP could not tell it from a resolved one (LSAI#53)
+                    Confidence = sref.IsContractString || sref.IsSignalConnection || isCrossFile
+                                 || sref.Confidence != GDReferenceConfidence.Strict
                         ? sref.Confidence : (GDReferenceConfidence?)null,
                     SharedTypes = sref.SharedTypes,
                     Reason = reason,

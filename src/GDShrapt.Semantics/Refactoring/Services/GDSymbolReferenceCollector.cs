@@ -457,7 +457,7 @@ public class GDSymbolReferenceCollector
         // Step 5: Reflection pattern references (get_method_list() + call(method.name))
         if (_projectModel != null && isClassMember)
         {
-            CollectReflectionSiteReferences(symbol, refs, seen);
+            CollectReflectionSiteReferences(symbol, declaringScript, refs, seen);
         }
 
         // Step 6: Class_name type usages
@@ -500,13 +500,26 @@ public class GDSymbolReferenceCollector
             if (localSymbol == null) continue;
 
             var hasLocalDeclaration = localSymbol.DeclarationNode != null;
-            var isOverride = hasLocalDeclaration && IsOverrideDeclaration(script, localSymbol);
+            // An override is a class member redeclaring THIS member: a test's local `var weapon` in a class that
+            // inherits SimTest.weapon() was taken for an override of Pylon.weapon() (LSAI#53)
+            var isOverride = hasLocalDeclaration
+                && localSymbol.ScopeType == GDSymbolScopeType.ClassMember
+                && IsOverrideDeclaration(script, localSymbol)
+                && (declaringScript == null || script == declaringScript
+                    || InheritsMemberFrom(script, symbol.Name, declaringScript));
             var isInherited = !hasLocalDeclaration && HasInheritedSymbol(script, symbol.Name);
 
             // Skip scripts that have their own independent declaration of the same symbol.
             // If a script declares the same name but it's NOT an override and NOT the original
             // declaring script, it's an unrelated symbol (e.g., different class with same var name).
             if (isClassMember && hasLocalDeclaration && !isOverride && script != declaringScript)
+                continue;
+
+            // An inherited use counts only when the member it inherits is this declaration: a test extending
+            // SimTest calling its own weapon() (or shadowing it with a local) is not a reference of
+            // Pylon.weapon() (LSAI#53, flight-sim file_refs/context)
+            if (isClassMember && isInherited && declaringScript != null && script != declaringScript
+                && !InheritsMemberFrom(script, symbol.Name, declaringScript))
                 continue;
 
             var localRefs = model.GetReferencesTo(localSymbol);
@@ -958,6 +971,7 @@ public class GDSymbolReferenceCollector
 
     private void CollectReflectionSiteReferences(
         GDSymbolInfo symbol,
+        GDScriptFile? declaringScript,
         List<GDSymbolReference> refs,
         HashSet<(string?, int, int)> seen)
     {
@@ -975,6 +989,11 @@ public class GDSymbolReferenceCollector
             {
                 if (site.Kind != reflectionKind) continue;
                 if (!site.Matches(symbol.Name)) continue;
+                // get_property_list() + get(prop.name) on self reflects this script's own members: in GUT's
+                // preferences it is no reference of Pylon._loaded (LSAI#53)
+                if (site.IsSelfCall && declaringScript != null && script != declaringScript
+                    && !InheritsMemberFrom(script, symbol.Name, declaringScript))
+                    continue;
 
                 var key = (script.FullPath, site.Line, site.Column);
                 if (!seen.Add(key)) continue;
@@ -1130,6 +1149,33 @@ public class GDSymbolReferenceCollector
             return false;
 
         return HasMemberInBaseType(extendsType, symbol.Name);
+    }
+
+    /// <summary>
+    /// Whether <paramref name="script"/> inherits <paramref name="memberName"/> from <paramref name="declaringScript"/>:
+    /// up the chain, through overrides of it, before any independent declaration of the name.
+    /// </summary>
+    private bool InheritsMemberFrom(GDScriptFile script, string memberName, GDScriptFile declaringScript)
+    {
+        var visited = new HashSet<string>(StringComparer.Ordinal);
+        var current = GetExtendsTypeName(script);
+        while (!string.IsNullOrEmpty(current) && visited.Add(current))
+        {
+            var baseScript = current.StartsWith("res://", StringComparison.OrdinalIgnoreCase)
+                ? _project.GetScriptByResourcePath(current)
+                : _project.GetScriptByTypeName(current);
+            if (baseScript?.SemanticModel == null)
+                return false;
+            if (baseScript == declaringScript)
+                return true;
+            // An override of the member (grandchild -> child overriding it -> base) is the same member; an
+            // independent declaration of the name (SimTest.weapon) is another one
+            if (baseScript.SemanticModel.FindSymbol(memberName) is { DeclarationNode: not null } declared
+                && !IsOverrideDeclaration(baseScript, declared))
+                return false;
+            current = GetExtendsTypeName(baseScript);
+        }
+        return false;
     }
 
     private bool HasInheritedSymbol(GDScriptFile script, string symbolName)

@@ -93,9 +93,16 @@ public class GDCliLspParityTests
             Context = new GDReferenceContext { IncludeDeclaration = true }
         }, CancellationToken.None);
 
+        // The CLI set, except duck-typed references when an unrelated class declares the same name: LSP carries no
+        // confidence, and those are as likely the other class's (LSAI#53)
+        var ambiguous = h.FindRefs.FindAllReferences(symbolName, filePath).UnrelatedGroups.Count > 0;
+        var duckTyped = FlattenCli(cliGroups).Count(l =>
+            l.Confidence is GDReferenceConfidence.Potential or GDReferenceConfidence.NameMatch && !l.IsContractString);
+        var expected = ambiguous ? cliCount - duckTyped : cliCount;
+
         lspResult.Should().NotBeNull();
-        lspResult!.Length.Should().Be(cliCount,
-            "LSP references must return exactly the CLI find-refs set (reads = all, including potential)");
+        lspResult!.Length.Should().Be(expected,
+            "LSP references return the CLI find-refs set, without the duck-typed ones of an ambiguous name");
         cliCount.Should().BeGreaterThanOrEqualTo(3, "this symbol has declaration + overrides + cross-file uses");
     }
 

@@ -42,6 +42,15 @@ public class GDReferencesHandler
         // references) so CLI and LSP are identical. Write operations (rename) stay strict-only.
         IEnumerable<CLI.Core.GDCliReferenceLocation> allRefs = FlattenLocations(groups);
 
+        // LSP carries no confidence: a duck-typed reference (untyped receiver) names the member only, and when an
+        // unrelated class declares the same name it is as likely theirs. LSAI#53: Pylon.is_loaded() listed GUT's
+        // `coll_script.is_loaded` (CollectedScript has its own). A uniquely named member keeps its duck-typed uses.
+        var materialized = allRefs.ToList();
+        if (materialized.Any(IsDuckTyped)
+            && _findRefsHandler.FindAllReferences(symbolName, filePath).UnrelatedGroups.Count > 0)
+            materialized = materialized.Where(r => !IsDuckTyped(r)).ToList();
+        allRefs = materialized;
+
         // Filter results based on IncludeDeclaration
         if (!@params.Context.IncludeDeclaration)
             allRefs = allRefs.Where(r => !r.IsDeclaration);
@@ -69,6 +78,9 @@ public class GDReferencesHandler
 
         return Task.FromResult<GDLspLocation[]?>(locations.ToArray());
     }
+
+    private static bool IsDuckTyped(CLI.Core.GDCliReferenceLocation r) =>
+        r.Confidence is GDReferenceConfidence.Potential or GDReferenceConfidence.NameMatch && !r.IsContractString;
 
     private static IEnumerable<CLI.Core.GDCliReferenceLocation> FlattenLocations(IEnumerable<GDReferenceGroup> groups)
     {
