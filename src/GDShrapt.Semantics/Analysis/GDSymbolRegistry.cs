@@ -1,4 +1,5 @@
 using GDShrapt.Reader;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -21,7 +22,9 @@ internal class GDSymbolRegistry
 
     // Cached symbol lists (built lazily, never invalidated — registry is immutable after construction)
     private IReadOnlyList<GDSymbolInfo>? _allSymbolsCache;
-    private readonly Dictionary<GDSymbolKind, IReadOnlyList<GDSymbolInfo>> _kindCache = new();
+    // 0ics (LSAI): read from several analysis threads at once (an autoload's model, read by every script that uses
+    // it): a Dictionary written concurrently corrupted itself (GetSymbolsOfKind, "concurrent update ... corrupted its state")
+    private readonly ConcurrentDictionary<GDSymbolKind, IReadOnlyList<GDSymbolInfo>> _kindCache = new();
 
     /// <summary>
     /// All symbols in this registry.
@@ -102,12 +105,7 @@ internal class GDSymbolRegistry
     /// </summary>
     public IReadOnlyList<GDSymbolInfo> GetSymbolsOfKind(GDSymbolKind kind)
     {
-        if (!_kindCache.TryGetValue(kind, out var cached))
-        {
-            cached = Symbols.Where(s => s.Kind == kind).ToList();
-            _kindCache[kind] = cached;
-        }
-        return cached;
+        return _kindCache.GetOrAdd(kind, k => Symbols.Where(s => s.Kind == k).ToList());
     }
 
     /// <summary>

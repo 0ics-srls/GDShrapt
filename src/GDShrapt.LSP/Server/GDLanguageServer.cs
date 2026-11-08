@@ -57,6 +57,16 @@ public class GDLanguageServer : IGDLanguageServer
             throw new InvalidOperationException("Server not initialized");
 
         using var registration = cancellationToken.Register(() => _shutdownTcs.TrySetCanceled());
+
+        // 0ics (LSAI): the end of stdin ends the server, as every LSP server does when its client is gone. It waited
+        // for an `exit` that a client killed (or closing without a shutdown) never sends: one orphan per session.
+        if (_transport is GDStdioJsonRpcTransport stdio)
+        {
+            var first = await Task.WhenAny(_shutdownTcs.Task, stdio.Completion).ConfigureAwait(false);
+            await first.ConfigureAwait(false);
+            return;
+        }
+
         await _shutdownTcs.Task.ConfigureAwait(false);
     }
 
